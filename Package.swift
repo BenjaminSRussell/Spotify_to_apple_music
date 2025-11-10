@@ -18,6 +18,11 @@ let package = Package(
         .executable(
             name: "merge-cli",
             targets: ["MergeCLI"]
+        ),
+        // macOS SwiftUI app
+        .executable(
+            name: "MergeApp",
+            targets: ["MergeApp"]
         )
     ],
     dependencies: [
@@ -56,6 +61,14 @@ let package = Package(
             dependencies: [
                 "MergeCore",
                 .product(name: "ArgumentParser", package: "swift-argument-parser")
+            ]
+        ),
+
+        // MergeApp - macOS SwiftUI application
+        .executableTarget(
+            name: "MergeApp",
+            dependencies: [
+                "MergeCore"
             ]
         ),
 
