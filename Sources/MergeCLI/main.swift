@@ -81,12 +81,38 @@ extension MergeCLI {
             Log.info("🎵 Spotify to Apple Music Migration CLI v0.1.0")
             Log.info("")
 
-            Log.info("📊 Computing diff...")
-            Log.info("Direction: \(direction)")
-            Log.info("")
+            let mergeDirection: MergeDirection
+            switch direction {
+            case "spotify-to-apple":
+                mergeDirection = .spotifyToApple
+            case "apple-to-spotify":
+                mergeDirection = .appleToSpotify
+            case "bidirectional":
+                mergeDirection = .bidirectional
+            default:
+                Log.error("Invalid direction: \(direction)")
+                throw ExitCode.validationFailure
+            }
 
-            // TODO: Implement diff computation
-            Log.info("Diff computation not yet implemented")
+            let coordinator = SyncCoordinator()
+
+            do {
+                let diff = try await coordinator.computeDiff(direction: mergeDirection)
+                let summary = coordinator.generateDiffSummary(diff: diff, direction: mergeDirection)
+
+                print("")
+                print(summary)
+                print("")
+
+                if diff.totalOperations == 0 {
+                    Log.info("✨ Nothing to sync - libraries are in sync!")
+                } else {
+                    Log.info("💡 Run 'merge-cli sync --direction \(direction)' to apply these changes")
+                }
+            } catch {
+                Log.error("Diff computation failed", error: error)
+                throw error
+            }
         }
     }
 }
@@ -130,15 +156,22 @@ extension MergeCLI {
             Log.info("Auto-resolve threshold: \(autoThreshold)")
             Log.info("")
 
-            if dryRun {
-                Log.info("🔍 Dry run mode - no actual changes will be made")
-                // TODO: Implement dry run
-            } else {
-                Log.info("🚀 Starting sync...")
-                // TODO: Implement actual sync
-            }
+            let coordinator = SyncCoordinator()
 
-            Log.info("Sync not yet implemented")
+            do {
+                let result = try await coordinator.performSync(
+                    direction: mergeDirection,
+                    dryRun: dryRun,
+                    autoThreshold: autoThreshold
+                )
+
+                if result.failureCount > 0 {
+                    throw ExitCode.failure
+                }
+            } catch {
+                Log.error("Sync failed", error: error)
+                throw error
+            }
         }
     }
 }
