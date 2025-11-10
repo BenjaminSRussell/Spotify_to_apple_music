@@ -31,22 +31,37 @@ extension MergeCLI {
             Log.info("🎵 Spotify to Apple Music Migration CLI v0.1.0")
             Log.info("")
 
-            if spotify {
-                Log.info("📥 Importing from Spotify...")
-                // TODO: Implement Spotify import
-                Log.info("✅ Spotify import complete (stub)")
-            }
-
-            if apple {
-                Log.info("📥 Importing from Apple Music...")
-                // TODO: Implement Apple Music import
-                Log.info("✅ Apple Music import complete (stub)")
-            }
-
             if !spotify && !apple {
                 Log.error("Please specify --spotify or --apple (or both)")
                 throw ExitCode.validationFailure
             }
+
+            let coordinator = ImportCoordinator()
+
+            // Import from Spotify
+            if spotify {
+                do {
+                    try await coordinator.importFromSpotify()
+                } catch {
+                    Log.error("Spotify import failed", error: error)
+                    throw error
+                }
+            }
+
+            // Import from Apple Music
+            if apple {
+                do {
+                    try await coordinator.importFromAppleMusic()
+                } catch {
+                    Log.error("Apple Music import failed", error: error)
+                    throw error
+                }
+            }
+
+            // Print summary
+            Log.info("")
+            let summary = try await coordinator.getImportSummary()
+            print(summary.summary)
         }
     }
 }
