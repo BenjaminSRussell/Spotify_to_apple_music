@@ -1,4 +1,5 @@
 import Foundation
+import GRDB
 
 // MARK: - Normalized Keys
 
@@ -130,5 +131,44 @@ public struct ManualMapping: Codable, Sendable {
         self.targetTrackID = targetTrackID
         self.confidenceScore = confidenceScore
         self.createdAt = createdAt
+    }
+}
+
+// MARK: - GRDB Conformance
+
+extension ManualMapping: FetchableRecord, PersistableRecord {
+    public static var databaseTableName: String { "manual_mappings" }
+
+    public enum Columns {
+        static let id = Column("id")
+        static let canonicalTrackID = Column("canonical_track_id")
+        static let sourceService = Column("source_service")
+        static let sourceTrackID = Column("source_track_id")
+        static let targetService = Column("target_service")
+        static let targetTrackID = Column("target_track_id")
+        static let confidenceScore = Column("confidence_score")
+        static let createdAt = Column("created_at")
+    }
+
+    public init(row: Row) {
+        self.id = row[Columns.id]
+        self.canonicalTrackID = CanonicalTrackID(value: row[Columns.canonicalTrackID])
+        self.sourceService = MusicService(rawValue: row[Columns.sourceService])!
+        self.sourceTrackID = row[Columns.sourceTrackID]
+        self.targetService = MusicService(rawValue: row[Columns.targetService])!
+        self.targetTrackID = row[Columns.targetTrackID]
+        self.confidenceScore = row[Columns.confidenceScore]
+        self.createdAt = row[Columns.createdAt]
+    }
+
+    public func encode(to container: inout PersistenceContainer) {
+        container[Columns.id] = id
+        container[Columns.canonicalTrackID] = canonicalTrackID.value
+        container[Columns.sourceService] = sourceService.rawValue
+        container[Columns.sourceTrackID] = sourceTrackID
+        container[Columns.targetService] = targetService.rawValue
+        container[Columns.targetTrackID] = targetTrackID
+        container[Columns.confidenceScore] = confidenceScore
+        container[Columns.createdAt] = createdAt
     }
 }

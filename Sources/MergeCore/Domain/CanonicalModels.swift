@@ -1,4 +1,5 @@
 import Foundation
+import GRDB
 
 // MARK: - Canonical Track Models
 
@@ -110,5 +111,83 @@ public struct CanonicalPlaylist: Codable, Sendable {
         self.trackIDs = trackIDs
         self.sourceSpotifyID = sourceSpotifyID
         self.sourceAppleID = sourceAppleID
+    }
+}
+
+// MARK: - GRDB Conformance
+
+extension CanonicalTrack: FetchableRecord, PersistableRecord {
+    public static var databaseTableName: String { "canonical_tracks" }
+
+    public enum Columns {
+        static let id = Column("id")
+        static let title = Column("title")
+        static let artist = Column("artist")
+        static let album = Column("album")
+        static let durationSeconds = Column("duration_seconds")
+        static let isExplicit = Column("is_explicit")
+        static let isrc = Column("isrc")
+        static let spotifyID = Column("spotify_id")
+        static let appleID = Column("apple_id")
+        static let availability = Column("availability")
+    }
+
+    public init(row: Row) {
+        self.id = CanonicalTrackID(value: row[Columns.id])
+        self.title = row[Columns.title]
+        self.artist = row[Columns.artist]
+        self.album = row[Columns.album]
+        self.durationSeconds = row[Columns.durationSeconds]
+        self.isExplicit = row[Columns.isExplicit]
+        self.isrc = row[Columns.isrc]
+        self.spotifyID = row[Columns.spotifyID]
+        self.appleID = row[Columns.appleID]
+        self.availability = AvailabilityFlags(rawValue: row[Columns.availability])
+    }
+
+    public func encode(to container: inout PersistenceContainer) {
+        container[Columns.id] = id.value
+        container[Columns.title] = title
+        container[Columns.artist] = artist
+        container[Columns.album] = album
+        container[Columns.durationSeconds] = durationSeconds
+        container[Columns.isExplicit] = isExplicit
+        container[Columns.isrc] = isrc
+        container[Columns.spotifyID] = spotifyID
+        container[Columns.appleID] = appleID
+        container[Columns.availability] = availability.rawValue
+    }
+}
+
+extension CanonicalPlaylist: FetchableRecord, PersistableRecord {
+    public static var databaseTableName: String { "canonical_playlists" }
+
+    public enum Columns {
+        static let id = Column("id")
+        static let name = Column("name")
+        static let owner = Column("owner")
+        static let description = Column("description")
+        static let sourceSpotifyID = Column("source_spotify_id")
+        static let sourceAppleID = Column("source_apple_id")
+    }
+
+    public init(row: Row) {
+        self.id = CanonicalPlaylistID(value: row[Columns.id])
+        self.name = row[Columns.name]
+        self.owner = row[Columns.owner]
+        self.description = row[Columns.description]
+        self.trackIDs = []  // Will be loaded separately from playlist_tracks table
+        self.sourceSpotifyID = row[Columns.sourceSpotifyID]
+        self.sourceAppleID = row[Columns.sourceAppleID]
+    }
+
+    public func encode(to container: inout PersistenceContainer) {
+        container[Columns.id] = id.value
+        container[Columns.name] = name
+        container[Columns.owner] = owner
+        container[Columns.description] = description
+        container[Columns.sourceSpotifyID] = sourceSpotifyID
+        container[Columns.sourceAppleID] = sourceAppleID
+        // trackIDs are stored separately in playlist_tracks table
     }
 }

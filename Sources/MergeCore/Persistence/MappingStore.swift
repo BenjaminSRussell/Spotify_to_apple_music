@@ -1,4 +1,5 @@
 import Foundation
+import GRDB
 
 /// Protocol for manual mapping persistence
 public protocol MappingStore: Sendable {
@@ -8,25 +9,40 @@ public protocol MappingStore: Sendable {
     func getAllManualMappings() async throws -> [ManualMapping]
 }
 
-/// Default implementation (stub)
+/// GRDB-based mapping store implementation
 public final class MappingStoreImpl: MappingStore {
-    public init() {}
+    private let dbQueue: DatabaseQueue
+
+    public init(dbQueue: DatabaseQueue = DatabaseProvider.shared.dbQueue) {
+        self.dbQueue = dbQueue
+    }
 
     public func getManualMapping(sourceService: MusicService, sourceID: String) async throws -> ManualMapping? {
-        // TODO: Implement database fetch
-        return nil
+        try await dbQueue.read { db in
+            try ManualMapping
+                .filter(ManualMapping.Columns.sourceService == sourceService.rawValue)
+                .filter(ManualMapping.Columns.sourceTrackID == sourceID)
+                .fetchOne(db)
+        }
     }
 
     public func saveManualMapping(_ mapping: ManualMapping) async throws {
-        // TODO: Implement database save
+        try await dbQueue.write { db in
+            try mapping.save(db)
+        }
     }
 
     public func deleteManualMapping(id: String) async throws {
-        // TODO: Implement database delete
+        try await dbQueue.write { db in
+            try ManualMapping
+                .filter(ManualMapping.Columns.id == id)
+                .deleteAll(db)
+        }
     }
 
     public func getAllManualMappings() async throws -> [ManualMapping] {
-        // TODO: Implement fetch all
-        return []
+        try await dbQueue.read { db in
+            try ManualMapping.fetchAll(db)
+        }
     }
 }

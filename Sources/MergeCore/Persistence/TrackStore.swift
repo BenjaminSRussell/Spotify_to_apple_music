@@ -1,4 +1,5 @@
 import Foundation
+import GRDB
 
 /// Protocol for track persistence operations
 public protocol TrackStore: Sendable {
@@ -8,37 +9,66 @@ public protocol TrackStore: Sendable {
     func fetchBySpotifyID(_ id: String) async throws -> CanonicalTrack?
     func fetchByAppleID(_ id: String) async throws -> CanonicalTrack?
     func fetchAll() async throws -> [CanonicalTrack]
+    func delete(id: CanonicalTrackID) async throws
 }
 
-/// Default implementation (stub)
+/// GRDB-based track store implementation
 public final class TrackStoreImpl: TrackStore {
-    public init() {}
+    private let dbQueue: DatabaseQueue
+
+    public init(dbQueue: DatabaseQueue = DatabaseProvider.shared.dbQueue) {
+        self.dbQueue = dbQueue
+    }
 
     public func save(_ track: CanonicalTrack) async throws {
-        // TODO: Implement database save
+        try await dbQueue.write { db in
+            try track.save(db)
+        }
     }
 
     public func saveAll(_ tracks: [CanonicalTrack]) async throws {
-        // TODO: Implement batch save
+        try await dbQueue.write { db in
+            for track in tracks {
+                try track.save(db)
+            }
+        }
     }
 
     public func fetch(id: CanonicalTrackID) async throws -> CanonicalTrack? {
-        // TODO: Implement database fetch
-        return nil
+        try await dbQueue.read { db in
+            try CanonicalTrack
+                .filter(Column("id") == id.value)
+                .fetchOne(db)
+        }
     }
 
     public func fetchBySpotifyID(_ id: String) async throws -> CanonicalTrack? {
-        // TODO: Implement database fetch by Spotify ID
-        return nil
+        try await dbQueue.read { db in
+            try CanonicalTrack
+                .filter(CanonicalTrack.Columns.spotifyID == id)
+                .fetchOne(db)
+        }
     }
 
     public func fetchByAppleID(_ id: String) async throws -> CanonicalTrack? {
-        // TODO: Implement database fetch by Apple ID
-        return nil
+        try await dbQueue.read { db in
+            try CanonicalTrack
+                .filter(CanonicalTrack.Columns.appleID == id)
+                .fetchOne(db)
+        }
     }
 
     public func fetchAll() async throws -> [CanonicalTrack] {
-        // TODO: Implement fetch all
-        return []
+        try await dbQueue.read { db in
+            try CanonicalTrack.fetchAll(db)
+        }
+    }
+
+    public func delete(id: CanonicalTrackID) async throws {
+        try await dbQueue.write { db in
+            try CanonicalTrack
+                .filter(Column("id") == id.value)
+                .deleteAll(db)
+        }
     }
 }
