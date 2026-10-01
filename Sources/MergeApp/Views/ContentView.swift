@@ -11,7 +11,10 @@ struct ContentView: View {
             DetailView()
         }
         .navigationTitle("Spotify ↔ Apple Music")
-        .alert("Error", isPresented: .constant(appState.errorMessage != nil)) {
+        .alert("Error", isPresented: Binding(
+            get: { appState.errorMessage != nil },
+            set: { if !$0 { appState.errorMessage = nil } }
+        )) {
             Button("OK") {
                 appState.errorMessage = nil
             }
