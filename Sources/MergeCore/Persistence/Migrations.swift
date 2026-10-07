@@ -88,6 +88,18 @@ public enum Migrations {
             try db.create(index: "idx_sync_runs_started", on: "sync_runs", columns: ["started_at"])
         }
 
+        // Migration v2: partial unique indexes so service IDs cannot duplicate (#13).
+        migrator.registerMigration("v2_unique_service_ids") { db in
+            try db.execute(sql: """
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_tracks_spotify_id_unique
+                ON canonical_tracks(spotify_id) WHERE spotify_id IS NOT NULL
+                """)
+            try db.execute(sql: """
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_tracks_apple_id_unique
+                ON canonical_tracks(apple_id) WHERE apple_id IS NOT NULL
+                """)
+        }
+
         try migrator.migrate(db)
     }
 }
