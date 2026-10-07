@@ -8,6 +8,7 @@ public protocol TrackStore: Sendable {
     func fetch(id: CanonicalTrackID) async throws -> CanonicalTrack?
     func fetchBySpotifyID(_ id: String) async throws -> CanonicalTrack?
     func fetchByAppleID(_ id: String) async throws -> CanonicalTrack?
+    func fetchByISRC(_ isrc: String) async throws -> CanonicalTrack?
     func fetchAll() async throws -> [CanonicalTrack]
     func delete(id: CanonicalTrackID) async throws
 }
@@ -22,16 +23,54 @@ public final class TrackStoreImpl: TrackStore {
 
     public func save(_ track: CanonicalTrack) async throws {
         try await dbQueue.write { db in
-            try track.save(db)
+            try Self.upsertMerge(track, db: db)
         }
     }
 
     public func saveAll(_ tracks: [CanonicalTrack]) async throws {
         try await dbQueue.write { db in
             for track in tracks {
-                try track.save(db)
+                try Self.upsertMerge(track, db: db)
             }
         }
+    }
+
+    /// Look up by service id / ISRC / metadata id, then merge service fields (#13).
+    private static func upsertMerge(_ incoming: CanonicalTrack, db: Database) throws {
+        var existing: CanonicalTrack?
+        if let sid = incoming.spotifyID,
+           let row = try CanonicalTrack.filter(CanonicalTrack.Columns.spotifyID == sid).fetchOne(db) {
+            existing = row
+        } else if let aid = incoming.appleID,
+                  let row = try CanonicalTrack.filter(CanonicalTrack.Columns.appleID == aid).fetchOne(db) {
+            existing = row
+        } else if let isrc = incoming.isrc, !isrc.isEmpty,
+                  let row = try CanonicalTrack.filter(CanonicalTrack.Columns.isrc == isrc).fetchOne(db) {
+            existing = row
+        } else if let row = try CanonicalTrack.filter(Column("id") == incoming.id.value).fetchOne(db) {
+            existing = row
+        }
+
+        guard var base = existing else {
+            try incoming.save(db)
+            return
+        }
+
+        // Keep stable primary key; merge service IDs and availability without nulling the other side.
+        if let sid = incoming.spotifyID { base.spotifyID = sid }
+        if let aid = incoming.appleID { base.appleID = aid }
+        base.availability.formUnion(incoming.availability)
+        if base.isrc == nil || base.isrc?.isEmpty == true { base.isrc = incoming.isrc }
+        if base.isExplicit == nil { base.isExplicit = incoming.isExplicit }
+        if (base.album == nil || base.album?.isEmpty == true), let album = incoming.album {
+            base.album = album
+        }
+        if base.durationSeconds == nil { base.durationSeconds = incoming.durationSeconds }
+        // Prefer non-empty titles/artists from incoming only if somehow empty (should not happen)
+        if !incoming.title.isEmpty { base.title = incoming.title }
+        if !incoming.artist.isEmpty { base.artist = incoming.artist }
+
+        try base.save(db)
     }
 
     public func fetch(id: CanonicalTrackID) async throws -> CanonicalTrack? {
@@ -54,6 +93,14 @@ public final class TrackStoreImpl: TrackStore {
         try await dbQueue.read { db in
             try CanonicalTrack
                 .filter(CanonicalTrack.Columns.appleID == id)
+                .fetchOne(db)
+        }
+    }
+
+    public func fetchByISRC(_ isrc: String) async throws -> CanonicalTrack? {
+        try await dbQueue.read { db in
+            try CanonicalTrack
+                .filter(CanonicalTrack.Columns.isrc == isrc)
                 .fetchOne(db)
         }
     }

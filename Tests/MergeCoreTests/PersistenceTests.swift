@@ -349,3 +349,36 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(fetched?.successCount, 48)
     }
 }
+
+    func testSpotifyThenAppleImportMergesServiceIDs() async throws {
+        let spotify = Normalizer.toCanonical(spotifyTrack: SpotifyTrackRef(
+            id: "sp-1",
+            name: "Merge Song",
+            artistNames: ["Merge Artist"],
+            albumName: "Merge Album",
+            durationMs: 215999,
+            isExplicit: false,
+            isrc: "USRC99999999"
+        ))
+        let apple = Normalizer.toCanonical(appleTrack: AppleTrackRef(
+            id: "ap-1",
+            name: "Merge Song",
+            artistName: "Merge Artist",
+            albumName: "Merge Album",
+            durationMs: 216000,
+            isExplicit: false,
+            isrc: "USRC99999999"
+        ))
+
+        try await trackStore.saveAll([spotify])
+        try await trackStore.saveAll([apple])
+
+        let all = try await trackStore.fetchAll()
+        XCTAssertEqual(all.count, 1, "same ISRC / rounded duration must not split")
+        let row = try XCTUnwrap(all.first)
+        XCTAssertEqual(row.spotifyID, "sp-1")
+        XCTAssertEqual(row.appleID, "ap-1")
+        XCTAssertTrue(row.availability.contains(.spotify))
+        XCTAssertTrue(row.availability.contains(.appleMusic))
+        XCTAssertEqual(row.availability.rawValue, 3)
+    }
