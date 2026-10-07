@@ -4,15 +4,16 @@ import MergeCore
 struct MatchResolverView: View {
     @StateObject private var matchState = MatchState()
     @State private var selectedMatch: AmbiguousMatch?
-    
+    @State private var showCheckmark = false
+
     var body: some View {
-        HSplitView {
+        NavigationSplitView {
             // List of ambiguous matches
             VStack(alignment: .leading) {
                 Text("Ambiguous Matches")
                     .font(.headline)
                     .padding(.horizontal)
-                
+
                 if matchState.isLoading {
                     ProgressView()
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -34,14 +35,39 @@ struct MatchResolverView: View {
                     }
                 }
             }
-            .frame(minWidth: 300)
-            
+        } detail: {
             // Match details and resolution
             if let match = selectedMatch {
                 MatchDetailView(match: match) { candidate in
                     Task {
+                        // Show checkmark animation
+                        withAnimation {
+                            showCheckmark = true
+                        }
+
+                        // Resolve the match
                         await matchState.resolveMatch(match, with: candidate)
-                        selectedMatch = nil
+
+                        // Keep checkmark visible for a brief moment
+                        try? await Task.sleep(nanoseconds: 800_000_000) // 0.8 seconds
+
+                        // Auto-advance to the next match or clear selection
+                        withAnimation {
+                            showCheckmark = false
+                            if !matchState.ambiguousMatches.isEmpty {
+                                selectedMatch = matchState.ambiguousMatches.first
+                            } else {
+                                selectedMatch = nil
+                            }
+                        }
+                    }
+                }
+                .overlay(alignment: .center) {
+                    if showCheckmark {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 60))
+                            .foregroundColor(.green)
+                            .transition(.scale.combined(with: .opacity))
                     }
                 }
             } else {
