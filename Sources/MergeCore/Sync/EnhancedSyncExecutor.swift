@@ -345,8 +345,4 @@ public final class EnhancedSyncExecutor: Sendable {
     }
 }
 
-public enum SyncExecutorError: Error {
-    case trackNotFound(String)
-    case playlistNotFound(String)
-    case invalidOperation(String)
-}
+// SyncExecutorError is declared in SyncExecutor.swift and shared by both executors.

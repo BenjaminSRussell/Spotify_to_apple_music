@@ -13,11 +13,16 @@ final class EndToEndTests: XCTestCase {
     
     override func setUp() async throws {
         // Use in-memory database for tests
-        trackStore = TrackStoreImpl(provider: .inMemory())
-        playlistStore = PlaylistStoreImpl(provider: .inMemory())
-        matchEngine = MatchEngine(trackStore: trackStore)
+        let db = try DatabaseProvider.inMemory()
+        trackStore = TrackStoreImpl(dbQueue: db.dbQueue)
+        playlistStore = PlaylistStoreImpl(dbQueue: db.dbQueue)
+        matchEngine = MatchEngine(trackStore: trackStore, mappingStore: MappingStoreImpl(dbQueue: db.dbQueue))
         diffComputer = DiffComputer(matchEngine: matchEngine)
-        syncExecutor = SyncExecutor(trackStore: trackStore, playlistStore: playlistStore)
+        syncExecutor = SyncExecutor(
+            trackStore: trackStore,
+            playlistStore: playlistStore,
+            syncRunStore: SyncRunStoreImpl(dbQueue: db.dbQueue)
+        )
     }
     
     // MARK: - Full Workflow Test
@@ -36,7 +41,12 @@ final class EndToEndTests: XCTestCase {
         }
         
         let totalTracks = try await trackStore.fetchAll()
-        XCTAssertEqual(totalTracks.count, 12, "Should have 12 total tracks (6 Spotify + 6 Apple)")
+        // Tracks that share an ISRC are upserted into one canonical row (#13), so the
+        // library holds 6 + 6 minus the shared ones.
+        let sharedISRCs = Set(TestFixtures.spotifyTracks.compactMap(\.isrc))
+            .intersection(TestFixtures.appleTracks.compactMap(\.isrc))
+        XCTAssertFalse(sharedISRCs.isEmpty, "fixtures should overlap")
+        XCTAssertEqual(totalTracks.count, 12 - sharedISRCs.count, "ISRC-shared tracks merge into one canonical track")
         print("✓ Import complete: \(totalTracks.count) tracks")
         
         // STEP 2: Matching
@@ -208,16 +218,23 @@ final class EndToEndTests: XCTestCase {
         let formats = [
             "The Kid LAROI feat. Justin Bieber",
             "The Kid LAROI ft. Justin Bieber",
-            "The Kid LAROI & Justin Bieber",
-            "The Kid LAROI featuring Justin Bieber"
+            "The Kid LAROI featuring Justin Bieber",
+            "The Kid LAROI (feat. Justin Bieber)",
+            "The Kid LAROI with Justin Bieber"
         ]
         
         let normalized = formats.map { normalizer.normalizeArtist($0, extractPrimary: true) }
         
         // All should normalize to same primary artist
         for norm in normalized {
-            XCTAssertEqual(norm, normalized[0], "All formats should normalize the same")
+            XCTAssertEqual(norm, "the kid laroi", "All featuring formats should normalize the same")
         }
+
+        // "&" names a duo and is kept (MatchingTests.testArtistNormalization)
+        XCTAssertEqual(normalizer.normalizeArtist("Simon & Garfunkel"), "simon garfunkel")
+        // Markers only match whole words, never the first word
+        XCTAssertEqual(normalizer.normalizeArtist("Felix Jaehn"), "felix jaehn")
+        XCTAssertEqual(normalizer.normalizeArtist("X Ambassadors"), "x ambassadors")
     }
     
     func testAlbumEditionNormalization() async throws {

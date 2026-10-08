@@ -200,8 +200,9 @@ final class SyncTests: XCTestCase {
         id: String,
         title: String,
         artist: String,
-        availability: Set<MusicService>
+        availability services: Set<MusicService>
     ) -> CanonicalTrack {
+        let availability = services.reduce(into: AvailabilityFlags()) { $0.insert(AvailabilityFlags($1)) }
         return CanonicalTrack(
             id: CanonicalTrackID(value: id),
             title: title,

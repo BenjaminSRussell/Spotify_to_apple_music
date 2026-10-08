@@ -29,3 +29,15 @@ jobs:
         run: swift build --build-tests
       - name: Test
         run: swift test --skip-build --parallel
+
+  linux:
+    name: swift test (Linux, MergeCore + CLI)
+    runs-on: ubuntu-latest
+    container: swift:6.2
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: SQLite headers
+        run: apt-get update -q && apt-get install -y -q libsqlite3-dev
+      - name: Test
+        run: swift test --parallel

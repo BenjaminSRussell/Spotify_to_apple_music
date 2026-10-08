@@ -11,6 +11,16 @@ public struct TrackTextNormalizer: Sendable {
     /// - Removes diacritics (é -> e)
     /// - Removes special characters
     /// - Normalizes whitespace
+    /// Cut `text` at the first whole-word marker that is not the first word
+    /// (so artists like "X Ambassadors" or "With Confidence" survive).
+    private func cutAtMarker(_ text: String, markers: [String]) -> String {
+        let words = text.split(separator: " ")
+        guard let idx = words.indices.dropFirst().first(where: { markers.contains(String(words[$0])) }) else {
+            return text
+        }
+        return words[..<idx].joined(separator: " ")
+    }
+
     private func normalize(_ text: String) -> String {
         var normalized = text.lowercased()
 
@@ -60,13 +70,7 @@ public struct TrackTextNormalizer: Sendable {
         }
 
         // Remove featured artists from title (they should be in artist field)
-        let featuringPatterns = ["feat ", "ft ", "featuring ", "with "]
-        for pattern in featuringPatterns {
-            if let range = normalized.range(of: pattern) {
-                normalized = String(normalized[..<range.lowerBound])
-                break
-            }
-        }
+        normalized = cutAtMarker(normalized, markers: ["feat", "ft", "featuring", "with"])
 
         // Remove parentheticals and brackets
         normalized = normalized.replacingOccurrences(of: "\\([^)]*\\)", with: "", options: .regularExpression)
@@ -89,22 +93,9 @@ public struct TrackTextNormalizer: Sendable {
 
         if extractPrimary {
             // Patterns that indicate featured artists
-            let featuringPatterns = [
-                "feat ",
-                "ft ",
-                "featuring ",
-                "with ",
-                "vs ",
-                "x "
-            ]
-
-            // Extract only the primary artist (before featuring)
-            for pattern in featuringPatterns {
-                if let range = normalized.range(of: pattern) {
-                    normalized = String(normalized[..<range.lowerBound])
-                    break
-                }
-            }
+            // Whole words only: "x " must not cut "Felix Jaehn", "ft " must not cut "Taft".
+            // "&" / "and" are kept: they usually name a duo ("Simon & Garfunkel").
+            normalized = cutAtMarker(normalized, markers: ["feat", "ft", "featuring", "with", "vs", "x"])
         }
 
         // Normalize separators

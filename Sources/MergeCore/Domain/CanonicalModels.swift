@@ -66,6 +66,19 @@ public struct AvailabilityFlags: OptionSet, Codable, Sendable {
 
     public static let spotify    = AvailabilityFlags(rawValue: 1 << 0)
     public static let appleMusic = AvailabilityFlags(rawValue: 1 << 1)
+
+    /// Flag for a single service
+    public init(_ service: MusicService) {
+        switch service {
+        case .spotify: self = .spotify
+        case .appleMusic: self = .appleMusic
+        }
+    }
+
+    /// Whether the track is available on `service`
+    public func contains(_ service: MusicService) -> Bool {
+        contains(AvailabilityFlags(service))
+    }
 }
 
 // MARK: - Canonical Playlist Models

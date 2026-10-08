@@ -232,8 +232,9 @@ struct TestFixtures {
     
     /// Create test database with sample data
     static func setupTestDatabase() async throws {
-        let trackStore = TrackStoreImpl(provider: .inMemory())
-        let playlistStore = PlaylistStoreImpl(provider: .inMemory())
+        let db = try DatabaseProvider.inMemory()
+        let trackStore = TrackStoreImpl(dbQueue: db.dbQueue)
+        let playlistStore = PlaylistStoreImpl(dbQueue: db.dbQueue)
         
         // Save all tracks
         for track in allTracks {
