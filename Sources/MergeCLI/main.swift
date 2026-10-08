@@ -8,7 +8,7 @@ struct MergeCLI: AsyncParsableCommand {
         commandName: "merge-cli",
         abstract: "Spotify to Apple Music migration tool",
         version: "0.1.0",
-        subcommands: [Import.self, Diff.self, Sync.self],
+        subcommands: [Import.self, Diff.self, Sync.self, Auth.self],
         defaultSubcommand: nil
     )
 }
@@ -171,6 +171,52 @@ extension MergeCLI {
             } catch {
                 Log.error("Sync failed", error: error)
                 throw error
+            }
+        }
+    }
+}
+
+// MARK: - Auth Command (#11)
+
+extension MergeCLI {
+    struct Auth: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            abstract: "Inspect or reset stored OAuth credentials (macOS Keychain)",
+            subcommands: [Status.self, Reset.self]
+        )
+
+        struct Status: ParsableCommand {
+            static let configuration = CommandConfiguration(abstract: "Show which services have stored tokens (values are never printed)")
+
+            func run() throws {
+                let store = CredentialStores.platformDefault()
+                for service in [MusicService.spotify, .appleMusic] {
+                    let line: String
+                    if let tokens = try store.load(for: service) {
+                        line = tokens.isExpired() ? "expired\(tokens.refreshToken != nil ? " (refreshable)" : "")" : "stored"
+                    } else {
+                        line = "none"
+                    }
+                    print("\(service.rawValue): \(line)")
+                }
+            }
+        }
+
+        struct Reset: ParsableCommand {
+            static let configuration = CommandConfiguration(abstract: "Delete stored tokens; you will be asked to sign in again")
+
+            @Option(name: .long, help: "spotify, apple-music, or all")
+            var service: String = "all"
+
+            func run() throws {
+                let store = CredentialStores.platformDefault()
+                switch service {
+                case "all": try store.deleteAll()
+                case "spotify": try store.delete(for: .spotify)
+                case "apple-music", "apple": try store.delete(for: .appleMusic)
+                default: throw ValidationError("unknown service \(service)")
+                }
+                print("Removed stored credentials for \(service)")
             }
         }
     }

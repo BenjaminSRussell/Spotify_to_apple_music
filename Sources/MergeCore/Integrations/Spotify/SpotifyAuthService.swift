@@ -6,6 +6,8 @@ public protocol SpotifyAuthService: Sendable {
     func authorize() async throws
     func refreshTokenIfNeeded() async throws
     var isAuthorized: Bool { get async }
+    /// Remove stored tokens (sign out)
+    func signOut() async throws
 }
 
 /// Spotify authentication implementation using SpotifyAPI
@@ -13,7 +15,11 @@ public final class SpotifyAuthServiceImpl: SpotifyAuthService {
     // TODO: Add SpotifyAPI instance
     // private let spotify: SpotifyAPI<AuthorizationCodeFlowManager>
 
-    public init() {
+    /// Token persistence: Keychain in production, injectable for tests (#11)
+    private let credentials: CredentialStore
+
+    public init(credentials: CredentialStore = CredentialStores.platformDefault()) {
+        self.credentials = credentials
         // TODO: Initialize SpotifyAPI with credentials
         // self.spotify = SpotifyAPI(
         //     authorizationManager: AuthorizationCodeFlowManager(
@@ -38,7 +44,7 @@ public final class SpotifyAuthServiceImpl: SpotifyAuthService {
         // 4. Exchange code for access/refresh tokens:
         //    try await spotify.authorizationManager.requestAccessAndRefreshTokens(code: code)
         //
-        // 5. Store tokens in Keychain for persistence
+        // 5. Store tokens in Keychain for persistence: try store(tokens)
         //
         // Example:
         // let authURL = spotify.authorizationManager.makeAuthorizationURL(
@@ -71,18 +77,22 @@ public final class SpotifyAuthServiceImpl: SpotifyAuthService {
         Log.debug("Token refresh not yet implemented")
     }
 
+    /// Authorized when stored tokens exist and are either unexpired or refreshable
     public var isAuthorized: Bool {
         get async {
-            // TODO: Check if we have valid tokens
-            //
-            // return spotify.authorizationManager.isAuthorized(for: [
-            //     .userLibraryRead,
-            //     .playlistReadPrivate
-            // ])
-
-            // For now, always return false (requires authorization)
-            return false
+            guard let tokens = try? credentials.load(for: .spotify) else { return false }
+            return !tokens.isExpired() || tokens.refreshToken != nil
         }
+    }
+
+    /// Persist tokens from the OAuth exchange / refresh (Keychain via `CredentialStore`)
+    public func store(_ tokens: OAuthTokens) throws {
+        try credentials.save(tokens, for: .spotify)
+        Log.info("Stored Spotify credentials: \(tokens.redactedDescription)")
+    }
+
+    public func signOut() async throws {
+        try credentials.delete(for: .spotify)
     }
 }
 
