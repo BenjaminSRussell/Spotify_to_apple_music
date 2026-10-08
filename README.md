@@ -148,6 +148,24 @@ swift run merge-cli sync --direction spotify-to-apple
 swift run merge-cli sync --direction spotify-to-apple --auto-threshold 0.90
 ```
 
+#### 4. Export Match Metrics (#9)
+
+Every match decision made during a diff or sync is stored in `match_outcomes`, tagged with the sync run's ID. Dry runs are recorded too. Export them for threshold tuning:
+
+```bash
+swift run merge-cli export-metrics --out report.csv            # app database
+swift run merge-cli export-metrics --out report.csv --db ./db.sqlite --buckets 20
+```
+
+This writes two files:
+
+| File | One row per | Columns |
+|---|---|---|
+| `report.csv` | sync run (plus `dry_run` runs and `(none)` for matches outside a run) | `run_id, started_at, completed_at, direction, status, operations, successes, failures, duration_seconds, matches, auto, ambiguous, no_match, auto_rate, mean_top_score` |
+| `report.histogram.csv` | run × decision × confidence bucket (`--buckets` equal-width bins over [0, 1]; empty buckets included) | `run_id, decision, bucket_lower, bucket_upper, count` |
+
+An empty database gives header-only files and exit 0. Parquet isn't written natively; convert the CSV with `python -c "import pandas as p; p.read_csv('report.csv').to_parquet('report.parquet')"`.
+
 ### macOS Application
 
 ```bash
