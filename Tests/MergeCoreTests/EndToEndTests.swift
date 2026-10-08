@@ -65,6 +65,8 @@ final class EndToEndTests: XCTestCase {
                 print("⚠ Ambiguous: '\(track.title)' - \(candidates.count) candidates")
             case .noMatch:
                 print("✗ No match: '\(track.title)'")
+            case .skipped:
+                XCTFail("nothing is skipped in this fixture")
             }
         }
         

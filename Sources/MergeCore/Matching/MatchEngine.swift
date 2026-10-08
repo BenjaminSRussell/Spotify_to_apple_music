@@ -7,16 +7,19 @@ public final class MatchEngine: Sendable {
     private let scorer: ConfidenceScorer
     private let trackStore: TrackStore
     private let mappingStore: MappingStore
+    private let exclusionStore: MatchExclusionStore?
 
     public init(
         policy: MergePolicy = .default,
         trackStore: TrackStore = TrackStoreImpl(),
-        mappingStore: MappingStore = MappingStoreImpl()
+        mappingStore: MappingStore = MappingStoreImpl(),
+        exclusionStore: MatchExclusionStore? = nil
     ) {
         self.policy = policy
         self.scorer = ConfidenceScorer()
         self.trackStore = trackStore
         self.mappingStore = mappingStore
+        self.exclusionStore = exclusionStore
     }
 
     // MARK: - Public Matching Methods
@@ -44,9 +47,12 @@ public final class MatchEngine: Sendable {
         if let manualMatch = try await checkManualMapping(source: source, targetService: targetService) {
             return .auto(candidate: manualMatch)
         }
+        let exclusions = try await exclusionStore?.exclusions(for: source.id, targetService: targetService)
+        if exclusions?.skipped == true { return .skipped }
 
-        // Stage 1: Get candidate tracks from target service
+        // Stage 1: Get candidate tracks from target service (minus user-rejected ones)
         let candidates = try await getCandidates(for: source, targetService: targetService)
+            .filter { !(exclusions?.rejectedCandidateIDs.contains($0.id.value) ?? false) }
 
         if candidates.isEmpty {
             return .noMatch
@@ -74,13 +80,12 @@ public final class MatchEngine: Sendable {
             sourceID = source.appleID
         }
 
-        guard let sourceID = sourceID else {
-            return nil
-        }
+        // Tracks without a service ID are mapped by canonical ID (see MatchResolutionService).
+        let lookupID = sourceID ?? source.id.value
 
         if let mapping = try await mappingStore.getManualMapping(
             sourceService: sourceService,
-            sourceID: sourceID
+            sourceID: lookupID
         ) {
             // Found manual mapping
             Log.info("Found manual mapping for track: \(source.title) by \(source.artist)")
@@ -128,7 +133,10 @@ public final class MatchEngine: Sendable {
         if let manualMatch = try await checkManualMapping(source: source, targetService: index.targetService) {
             return .auto(candidate: manualMatch)
         }
+        let exclusions = try await exclusionStore?.exclusions(for: source.id, targetService: index.targetService)
+        if exclusions?.skipped == true { return .skipped }
         let candidates = index.candidates(for: source)
+            .filter { !(exclusions?.rejectedCandidateIDs.contains($0.id.value) ?? false) }
         if candidates.isEmpty {
             return .noMatch
         }
@@ -187,6 +195,7 @@ public final class MatchEngine: Sendable {
         var autoMatches = 0
         var ambiguousMatches = 0
         var noMatches = 0
+        var skipped = 0
 
         for decision in results.values {
             switch decision {
@@ -196,6 +205,8 @@ public final class MatchEngine: Sendable {
                 ambiguousMatches += 1
             case .noMatch:
                 noMatches += 1
+            case .skipped:
+                skipped += 1
             }
         }
 
@@ -203,7 +214,8 @@ public final class MatchEngine: Sendable {
             total: results.count,
             autoMatches: autoMatches,
             ambiguousMatches: ambiguousMatches,
-            noMatches: noMatches
+            noMatches: noMatches,
+            skippedMatches: skipped
         )
     }
 }
@@ -216,6 +228,7 @@ public struct MatchStatistics: Sendable {
     public let autoMatches: Int
     public let ambiguousMatches: Int
     public let noMatches: Int
+    public let skippedMatches: Int
 
     public var autoMatchRate: Double {
         guard total > 0 else { return 0.0 }
@@ -229,6 +242,7 @@ public struct MatchStatistics: Sendable {
         - Auto-matched: \(autoMatches) (\(String(format: "%.1f%%", autoMatchRate * 100)))
         - Needs review: \(ambiguousMatches)
         - No match found: \(noMatches)
+        - Skipped by you: \(skippedMatches)
         """
     }
 }

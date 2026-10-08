@@ -18,14 +18,19 @@ public final class SyncCoordinator: Sendable {
         checkpointStore: SyncCheckpointStore? = SyncCheckpointStoreImpl(),
         syncStateStore: PlaylistSyncStateStore? = PlaylistSyncStateStoreImpl(),
         mappingStore: MappingStore? = nil,
+        exclusionStore: MatchExclusionStore? = MatchExclusionStoreImpl(),
         remote: SyncRemote? = nil
     ) {
         self.trackStore = trackStore
         self.playlistStore = playlistStore
         self.syncRunStore = syncRunStore
         self.syncStateStore = syncStateStore
-        let engine = mappingStore.map { MatchEngine(trackStore: trackStore, mappingStore: $0) }
-            ?? MatchEngine(trackStore: trackStore)
+        // Manual mappings (Stage 0) and resolver skip/reject decisions apply to every diff (#7, #10).
+        let engine = MatchEngine(
+            trackStore: trackStore,
+            mappingStore: mappingStore ?? MappingStoreImpl(),
+            exclusionStore: exclusionStore
+        )
         self.diffComputer = DiffComputer(matchEngine: engine, outcomeStore: outcomeStore)
         // Rate-limited, retrying, checkpointed executor (#8) with progress + cancel (#12).
         self.syncExecutor = EnhancedSyncExecutor(

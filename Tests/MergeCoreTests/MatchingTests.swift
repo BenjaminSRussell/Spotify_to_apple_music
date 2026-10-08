@@ -291,7 +291,7 @@ final class MatchingTests: XCTestCase {
             XCTAssertGreaterThanOrEqual(candidate.score, 0.85)
         case .ambiguous:
             XCTFail("Should be auto-match")
-        case .noMatch:
+        case .noMatch, .skipped:
             XCTFail("Should find match")
         }
     }

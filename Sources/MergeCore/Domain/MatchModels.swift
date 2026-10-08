@@ -98,6 +98,8 @@ public enum MatchDecision: Sendable {
     case auto(candidate: MatchScore)
     case ambiguous(candidates: [MatchScore])
     case noMatch
+    /// The user chose to skip this track for the target service (#7, #10): no match, no add, no prompt.
+    case skipped
 }
 
 // MARK: - Manual Mapping

@@ -58,6 +58,10 @@ public struct DiffComputer: Sendable {
                 // Needs manual resolution - skip for now
                 Log.debug("Ambiguous match for: \(sourceTrack.title) - skipping")
 
+            case .skipped:
+                // User skipped this track for the target (#7, #10): never add it.
+                Log.debug("Skipped by user: \(sourceTrack.title)")
+
             case .noMatch:
                 // No match found - need to add to target
                 let operation = createAddOperation(

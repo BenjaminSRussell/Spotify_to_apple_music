@@ -119,6 +119,55 @@ public struct MatchResolver: Sendable {
     }
 }
 
+// MARK: - Durable resolution prompt (#7, #10)
+
+/// What the user decided for one pending track.
+public enum ResolverChoice: Equatable, Sendable {
+    case choose(candidateID: String)
+    case reject(candidateID: String)
+    case skip
+    case later
+    case quit
+}
+
+extension MatchResolver {
+    /// Parse one line of resolver input: `N` choose, `xN` reject candidate N, `s` skip forever,
+    /// `n`/empty decide later, `q` quit. Returns nil for invalid input.
+    public static func parseChoice(_ input: String, candidateIDs: [String]) -> ResolverChoice? {
+        let text = input.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        switch text {
+        case "", "n", "next": return .later
+        case "s", "skip": return .skip
+        case "q", "quit": return .quit
+        default: break
+        }
+        let reject = text.hasPrefix("x")
+        guard let index = Int(reject ? String(text.dropFirst()) : text),
+              index >= 1, index <= candidateIDs.count else { return nil }
+        let id = candidateIDs[index - 1]
+        return reject ? .reject(candidateID: id) : .choose(candidateID: id)
+    }
+
+    /// Text shown for one pending resolution (mirrors the app's resolver screen).
+    public static func render(_ pending: PendingResolution, position: Int, total: Int) -> String {
+        var lines = [
+            String(repeating: "=", count: 70),
+            "[\(position)/\(total)] \(pending.source.title) — \(pending.source.artist)"
+                + (pending.source.album.map { "  (\($0))" } ?? "")
+                + "  → \(pending.targetService == .appleMusic ? "Apple Music" : "Spotify")",
+            String(repeating: "-", count: 70)
+        ]
+        for (index, candidate) in pending.candidates.enumerated() {
+            let track = candidate.track
+            let title = track.map { "\($0.title) — \($0.artist)" } ?? candidate.id
+            let album = track?.album.map { " (\($0))" } ?? ""
+            lines.append(String(format: "  %2d. %3.0f%%  ", index + 1, candidate.score.score * 100) + title + album)
+        }
+        lines.append("Choose 1-\(pending.candidates.count), xN reject candidate N, s skip track, Enter later, q quit")
+        return lines.joined(separator: "\n")
+    }
+}
+
 // MARK: - Errors
 
 public enum MatchResolutionError: Error {
