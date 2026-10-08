@@ -100,6 +100,14 @@ public enum Migrations {
                 """)
         }
 
+        // Migration v3: case-insensitive ISRC index for matching lookups (#14).
+        migrator.registerMigration("v3_isrc_nocase_index") { db in
+            try db.execute(sql: """
+                CREATE INDEX IF NOT EXISTS idx_tracks_isrc_nocase
+                ON canonical_tracks(isrc COLLATE NOCASE)
+                """)
+        }
+
         try migrator.migrate(db)
     }
 }

@@ -9,6 +9,8 @@ public protocol TrackStore: Sendable {
     func fetchBySpotifyID(_ id: String) async throws -> CanonicalTrack?
     func fetchByAppleID(_ id: String) async throws -> CanonicalTrack?
     func fetchByISRC(_ isrc: String) async throws -> CanonicalTrack?
+    /// Indexed, case-insensitive ISRC lookup restricted to tracks available on `service` (#14)
+    func fetchByISRC(_ isrc: String, availableOn service: MusicService) async throws -> CanonicalTrack?
     func fetchAll() async throws -> [CanonicalTrack]
     func delete(id: CanonicalTrackID) async throws
 }
@@ -102,6 +104,21 @@ public final class TrackStoreImpl: TrackStore {
             try CanonicalTrack
                 .filter(CanonicalTrack.Columns.isrc == isrc)
                 .fetchOne(db)
+        }
+    }
+
+    /// Uses `idx_tracks_isrc_nocase` (migration v3); see `PersistenceTests.testISRCLookupUsesIndex`.
+    static let isrcLookupSQL = """
+        SELECT * FROM canonical_tracks
+        WHERE isrc = ? COLLATE NOCASE AND (availability & ?) != 0
+        LIMIT 1
+        """
+
+    public func fetchByISRC(_ isrc: String, availableOn service: MusicService) async throws -> CanonicalTrack? {
+        guard !isrc.isEmpty else { return nil }
+        let flag = AvailabilityFlags(service).rawValue
+        return try await dbQueue.read { db in
+            try CanonicalTrack.fetchOne(db, sql: Self.isrcLookupSQL, arguments: [isrc, flag])
         }
     }
 

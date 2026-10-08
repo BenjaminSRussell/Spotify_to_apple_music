@@ -104,87 +104,70 @@ public final class MatchEngine: Sendable {
 
     // MARK: - Stage 1: Candidate Retrieval
 
-    /// Get candidate tracks from target service
-    /// Uses multiple search strategies to find potential matches
+    /// Get candidate tracks from target service (single-track path)
+    /// ISRC uses the indexed `TrackStore.fetchByISRC(_:availableOn:)` query. Metadata search
+    /// builds a `CandidateIndex` from one `fetchAll()`. Batches should use `matchTracks`,
+    /// which builds the index once for all sources.
     private func getCandidates(
         for source: CanonicalTrack,
         targetService: MusicService
     ) async throws -> [CanonicalTrack] {
-        // Strategy 1: ISRC exact match
-        if let isrc = source.isrc, !isrc.isEmpty {
-            if let isrcMatch = try await findByISRC(isrc: isrc, service: targetService) {
-                return [isrcMatch]
-            }
+        if let isrc = source.isrc, !isrc.isEmpty,
+           let hit = try await trackStore.fetchByISRC(isrc, availableOn: targetService) {
+            return [hit]
         }
-
-        // Strategy 2: Search by metadata
-        let metadataCandidates = try await searchByMetadata(
-            title: source.title,
-            artist: source.artist,
-            album: source.album,
-            targetService: targetService
-        )
-
-        return metadataCandidates
+        let index = CandidateIndex(tracks: try await trackStore.fetchAll(), targetService: targetService)
+        return index.metadataCandidates(title: source.title, artist: source.artist)
     }
 
-    /// Find track by ISRC in target service
-    private func findByISRC(isrc: String, service: MusicService) async throws -> CanonicalTrack? {
-        let tracks = try await trackStore.fetchAll()
-
-        return tracks.first { track in
-            guard track.availability.contains(service) else {
-                return false
-            }
-
-            return track.isrc?.lowercased() == isrc.lowercased()
+    /// Match using a prebuilt index (no store reads besides the manual-mapping lookup)
+    private func match(
+        source: CanonicalTrack,
+        index: CandidateIndex
+    ) async throws -> MatchDecision {
+        if let manualMatch = try await checkManualMapping(source: source, targetService: index.targetService) {
+            return .auto(candidate: manualMatch)
         }
-    }
-
-    /// Search for tracks by metadata
-    private func searchByMetadata(
-        title: String,
-        artist: String,
-        album: String?,
-        targetService: MusicService
-    ) async throws -> [CanonicalTrack] {
-        // Get all tracks for target service
-        let allTracks = try await trackStore.fetchAll()
-
-        let candidates = allTracks.filter { track in
-            // Must be available on target service
-            guard track.availability.contains(targetService) else {
-                return false
-            }
-
-            // Basic filtering: artist name should have some similarity
-            let normalizer = TrackTextNormalizer()
-            let sourceArtist = normalizer.normalizeArtist(artist)
-            let candidateArtist = normalizer.normalizeArtist(track.artist)
-
-            // Quick filter: artist names should share at least one word
-            let sourceWords = Set(sourceArtist.split(separator: " "))
-            let candidateWords = Set(candidateArtist.split(separator: " "))
-
-            return !sourceWords.isDisjoint(with: candidateWords)
+        let candidates = index.candidates(for: source)
+        if candidates.isEmpty {
+            return .noMatch
         }
-
-        // Limit to reasonable number of candidates
-        return Array(candidates.prefix(50))
+        return scorer.makeDecision(source: source, candidates: candidates)
     }
 
     // MARK: - Batch Matching
 
+    /// Build a candidate index for `targetService` with a single full read of `canonical_tracks`
+    public func makeCandidateIndex(targetService: MusicService) async throws -> CandidateIndex {
+        CandidateIndex(tracks: try await trackStore.fetchAll(), targetService: targetService)
+    }
+
     /// Match multiple tracks at once
+    /// Reads `canonical_tracks` once (O(1) full reads for N sources) and matches with a
+    /// bounded task group.
     public func matchTracks(
         sources: [CanonicalTrack],
-        targetService: MusicService
+        targetService: MusicService,
+        maxConcurrency: Int = 8
     ) async throws -> [CanonicalTrackID: MatchDecision] {
+        guard !sources.isEmpty else { return [:] }
+        let index = try await makeCandidateIndex(targetService: targetService)
         var results: [CanonicalTrackID: MatchDecision] = [:]
+        results.reserveCapacity(sources.count)
 
-        for source in sources {
-            let decision = try await match(source: source, targetService: targetService)
-            results[source.id] = decision
+        try await withThrowingTaskGroup(of: (CanonicalTrackID, MatchDecision).self) { group in
+            var iterator = sources.makeIterator()
+            var running = 0
+            while running < max(1, maxConcurrency), let source = iterator.next() {
+                group.addTask { (source.id, try await self.match(source: source, index: index)) }
+                running += 1
+            }
+            while let (id, decision) = try await group.next() {
+                results[id] = decision
+                if let source = iterator.next() {
+                    group.addTask { (source.id, try await self.match(source: source, index: index)) }
+                }
+            }
         }
 
         return results
@@ -196,12 +179,16 @@ public final class MatchEngine: Sendable {
         targetService: MusicService
     ) async throws -> MatchStatistics {
         let results = try await matchTracks(sources: sources, targetService: targetService)
+        return Self.statistics(from: results)
+    }
 
+    /// Statistics from already-computed results (no re-matching)
+    public static func statistics(from results: [CanonicalTrackID: MatchDecision]) -> MatchStatistics {
         var autoMatches = 0
         var ambiguousMatches = 0
         var noMatches = 0
 
-        for (_, decision) in results {
+        for decision in results.values {
             switch decision {
             case .auto:
                 autoMatches += 1
@@ -213,7 +200,7 @@ public final class MatchEngine: Sendable {
         }
 
         return MatchStatistics(
-            total: sources.count,
+            total: results.count,
             autoMatches: autoMatches,
             ambiguousMatches: ambiguousMatches,
             noMatches: noMatches

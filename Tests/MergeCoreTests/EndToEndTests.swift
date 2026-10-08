@@ -209,6 +209,36 @@ final class EndToEndTests: XCTestCase {
         }
     }
     
+    // MARK: - Matching Performance (#14)
+
+    /// Time budget for matching 5,000 sources against a 5,000-track catalog (debug build, CI
+    /// runner). The old pipeline did two full-table reads per source (~10,000 reads); the
+    /// candidate index does one. Documented in docs/MATCHING_PIPELINE.md.
+    static let match5kBudgetSeconds: TimeInterval = 60
+
+    func testMatching5kFixtureWithinBudget() async throws {
+        let n = 5_000
+        let catalog = (0..<n).map { i in
+            CanonicalTrack(id: CanonicalTrackID(value: "am-\(i)"), title: "Song \(i)", artist: "Artist \(i % 1_000)",
+                           durationSeconds: 180 + i % 60, appleID: "am-\(i)", availability: .appleMusic)
+        }
+        try await trackStore.saveAll(catalog)
+        let sources = (0..<n).map { i in
+            CanonicalTrack(id: CanonicalTrackID(value: "sp-\(i)"), title: "Song \(i)", artist: "Artist \(i % 1_000)",
+                           durationSeconds: 180 + i % 60, spotifyID: "sp-\(i)", availability: .spotify)
+        }
+
+        let start = Date()
+        let results = try await matchEngine.matchTracks(sources: sources, targetService: .appleMusic)
+        let elapsed = Date().timeIntervalSince(start)
+        print("Matched \(n) tracks against \(n) in \(String(format: "%.2f", elapsed))s")
+
+        XCTAssertEqual(results.count, n)
+        let stats = MatchEngine.statistics(from: results)
+        XCTAssertGreaterThan(stats.autoMatchRate, 0.95, stats.summary)
+        XCTAssertLessThan(elapsed, Self.match5kBudgetSeconds, "5k matching exceeded budget")
+    }
+
     // MARK: - Text Normalization Tests
     
     func testFeaturingArtistNormalization() async throws {
