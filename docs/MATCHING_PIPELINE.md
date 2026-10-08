@@ -650,6 +650,23 @@ func matchWithFingerprintFallback(
 
 ---
 
+## Candidate retrieval as implemented (#14)
+
+`MatchEngine` no longer reads `canonical_tracks` once or twice per source track.
+
+| Path | Store reads | How |
+|---|---|---|
+| `matchTracks(sources:targetService:)` (batch) | **1** `fetchAll()` for N sources | Builds a `CandidateIndex` once, then matches with a bounded `TaskGroup` (default 8). |
+| `matchSpotifyTrackToApple` / `matchAppleTrackToSpotify` (single) | An ISRC hit costs 1 indexed query. Otherwise 1 `fetchAll()`. | `TrackStore.fetchByISRC(_:availableOn:)` uses `idx_tracks_isrc_nocase` (migration v3). |
+| `MatchEngine.statistics(from:)` | 0 | Summarises results you already have; no re-matching. |
+
+**`CandidateIndex`** (`Sources/MergeCore/Matching/CandidateIndex.swift`)
+- **ISRC:** O(1) lookup in an uppercased map, limited to tracks on the target service.
+- **Blocking:** normalized artist words map to the tracks that contain them. Words are used rarest first. A word that matches more than `commonWordThreshold` tracks (500) is skipped once a rarer word has matched, so "lil", "dj", "the" and "band" no longer flood the candidates.
+- **Ranking before truncation:** blocked candidates are pre-scored (0.6 × title similarity + 0.4 × artist similarity), with insertion order as the tie-break. The top `maxCandidates` (50) then go to `ConfidenceScorer`. Recall no longer depends on table order: 60 "Lil X" rows inserted before "Lil Y – Song" still yield the true match (`MatchEngineIndexTests`).
+
+**Time budget:** matching 5,000 sources against a 5,000-track catalog must finish in **under 60 s** on a debug build (`EndToEndTests.testMatching5kFixtureWithinBudget`). Locally (Linux, Swift 6.2, debug) it takes about 2.6 s.
+
 ## Performance Metrics & Optimization
 
 ### Expected Performance
