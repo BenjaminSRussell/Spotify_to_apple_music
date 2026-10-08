@@ -56,6 +56,9 @@ public struct CanonicalTrack: Codable, Sendable {
     }
 }
 
+/// `id` is already a stable Hashable key, so tracks can drive SwiftUI tables and lists.
+extension CanonicalTrack: Identifiable {}
+
 /// Flags indicating which services have this track
 public struct AvailabilityFlags: OptionSet, Codable, Sendable {
     public let rawValue: Int

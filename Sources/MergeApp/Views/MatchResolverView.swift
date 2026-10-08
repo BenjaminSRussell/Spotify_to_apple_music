@@ -3,7 +3,11 @@ import MergeCore
 
 struct MatchResolverView: View {
     @StateObject private var matchState = MatchState()
-    @State private var selectedMatch: AmbiguousMatch?
+    // List selection is by row ID (AmbiguousMatch is Identifiable by UUID)
+    @State private var selectedMatchID: AmbiguousMatch.ID?
+    private var selectedMatch: AmbiguousMatch? {
+        matchState.ambiguousMatches.first { $0.id == selectedMatchID }
+    }
     @State private var showCheckmark = false
 
     var body: some View {
@@ -30,7 +34,7 @@ struct MatchResolverView: View {
                     }
                     .frame(maxWidth: .infinity)
                 } else {
-                    List(matchState.ambiguousMatches, selection: $selectedMatch) { match in
+                    List(matchState.ambiguousMatches, selection: $selectedMatchID) { match in
                         AmbiguousMatchRow(match: match)
                     }
                 }
@@ -55,9 +59,9 @@ struct MatchResolverView: View {
                         withAnimation {
                             showCheckmark = false
                             if !matchState.ambiguousMatches.isEmpty {
-                                selectedMatch = matchState.ambiguousMatches.first
+                                selectedMatchID = matchState.ambiguousMatches.first?.id
                             } else {
-                                selectedMatch = nil
+                                selectedMatchID = nil
                             }
                         }
                     }
