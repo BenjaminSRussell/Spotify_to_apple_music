@@ -140,8 +140,7 @@ Sources/MergeCore/
 │   ├── MatchScorer.swift         # Multi-component scoring
 │   └── MatchEngine.swift         # Orchestration
 ├── Diff/                         # Library comparison
-│   ├── LibraryDiffEngine.swift   # Compute sync operations
-│   └── PlaylistDiffEngine.swift  # Playlist-specific diff
+│   └── (removed in #16. The single diff entrypoint is Sync/DiffComputer.swift)
 ├── Sync/                         # Sync execution
 │   ├── MergePolicy.swift         # User-defined sync rules
 │   ├── SyncPlanner.swift         # Operation planning
@@ -669,7 +668,12 @@ public final class MatchEngine {
 
 ## 7. Diff & Sync
 
-### LibraryDiffEngine
+### LibraryDiffEngine (design sketch: superseded by `DiffComputer`)
+
+> **Implementation note (#16):** the shipped code has a single diff entrypoint,
+> `DiffComputer.computeLibraryDiff(sourceTracks:sourcePlaylists:targetPlaylists:targetService:)`
+> in `Sources/MergeCore/Sync/DiffComputer.swift`. The `LibraryDiffEngine` type below was an early design;
+> its stub returned empty diffs and has been removed. See the README section "Diff entrypoint".
 
 Compares canonical snapshots to determine required operations.
 
@@ -819,13 +823,13 @@ final class DiffViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var error: String?
 
-    private let diffEngine: LibraryDiffEngine
+    private let diffEngine: DiffComputer   // was LibraryDiffEngine (#16)
     private let trackStore: TrackStore
     private let playlistStore: PlaylistStore
     private let policy: MergePolicy
 
     init(
-        diffEngine: LibraryDiffEngine,
+        diffEngine: DiffComputer,
         trackStore: TrackStore,
         playlistStore: PlaylistStore,
         policy: MergePolicy
