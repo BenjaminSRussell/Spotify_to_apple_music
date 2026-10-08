@@ -43,6 +43,11 @@ public enum SyncStatus: String, Codable, Sendable {
     case running
     case completed
     case failed
+    /// Stopped by the user; resumable from its checkpoints (#12).
+    case cancelled
+
+    /// Runs that `merge-cli resume` can pick up.
+    public var isResumable: Bool { self != .completed }
 }
 
 // MARK: - GRDB Conformance
@@ -70,7 +75,7 @@ extension SyncRun: FetchableRecord, PersistableRecord {
         self.operationsCount = row[Columns.operationsCount]
         self.successCount = row[Columns.successCount]
         self.failureCount = row[Columns.failureCount]
-        self.status = SyncStatus(rawValue: row[Columns.status])!
+        self.status = SyncStatus(rawValue: row[Columns.status]) ?? .failed
         self.durationSeconds = row[Columns.durationSeconds]
     }
 
@@ -95,6 +100,14 @@ public protocol SyncRunStore: Sendable {
     func fetch(id: String) async throws -> SyncRun?
     func fetchAll() async throws -> [SyncRun]
     func fetchRecent(limit: Int) async throws -> [SyncRun]
+}
+
+extension SyncRunStore {
+    /// Most recent run that did not complete (running when the app died, failed, or cancelled).
+    public func fetchLatestResumable() async throws -> SyncRun? {
+        guard let latest = try await fetchRecent(limit: 1).first, latest.status.isResumable else { return nil }
+        return latest
+    }
 }
 
 /// GRDB-based sync run store implementation

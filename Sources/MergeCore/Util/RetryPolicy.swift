@@ -48,7 +48,7 @@ public actor RetryPolicy {
                 
                 // Don't sleep after last attempt
                 if attempt < maxAttempts - 1 {
-                    let delay = calculateDelay(attempt: attempt)
+                    let delay = Self.honoringRetryAfter(error, backoff: calculateDelay(attempt: attempt))
                     Log.debug("Attempt \(attempt + 1) failed, retrying in \(String(format: "%.2f", delay))s...")
                     
                     try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
@@ -77,6 +77,12 @@ public actor RetryPolicy {
         return max(0, cappedDelay + jitter)
     }
     
+    /// Server-provided `Retry-After` wins over a shorter backoff (capped at 5 minutes).
+    static func honoringRetryAfter(_ error: Error, backoff: TimeInterval) -> TimeInterval {
+        guard let retryAfter = (error as? HTTPError)?.retryAfter, retryAfter > 0 else { return backoff }
+        return max(backoff, min(retryAfter, 300))
+    }
+
     // MARK: - Convenience Methods
     
     /// Check if error is retryable (network/rate limit errors)
@@ -123,9 +129,12 @@ public protocol RetryableError: Error {}
 public struct HTTPError: Error {
     public let statusCode: Int
     public let message: String?
-    
-    public init(statusCode: Int, message: String? = nil) {
+    /// Seconds from the `Retry-After` response header (429/503), if present.
+    public let retryAfter: TimeInterval?
+
+    public init(statusCode: Int, message: String? = nil, retryAfter: TimeInterval? = nil) {
         self.statusCode = statusCode
         self.message = message
+        self.retryAfter = retryAfter
     }
 }

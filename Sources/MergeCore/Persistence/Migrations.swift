@@ -125,6 +125,27 @@ public enum Migrations {
             try db.create(index: "idx_match_outcomes_run", on: "match_outcomes", columns: ["run_id"])
         }
 
+        // Migration v5: per-operation checkpoints for resumable sync + rollback metadata (#8, #12).
+        migrator.registerMigration("v5_sync_checkpoints") { db in
+            try db.create(table: "sync_checkpoints") { t in
+                t.column("run_id", .text).notNull()
+                t.column("op_key", .text).notNull()
+                t.column("status", .text).notNull()
+                t.column("previous_track_ids", .text)
+                t.column("error", .text)
+                t.column("updated_at", .datetime).notNull()
+                t.primaryKey(["run_id", "op_key"])
+            }
+            // Last applied member digest per playlist per service: incremental sync "etag".
+            try db.create(table: "playlist_sync_state") { t in
+                t.column("service", .text).notNull()
+                t.column("playlist_id", .text).notNull()
+                t.column("members_digest", .text).notNull()
+                t.column("synced_at", .datetime).notNull()
+                t.primaryKey(["service", "playlist_id"])
+            }
+        }
+
         try migrator.migrate(db)
     }
 }

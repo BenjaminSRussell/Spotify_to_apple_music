@@ -42,19 +42,31 @@ public struct SyncResult: Sendable {
     public let failureCount: Int
     public let duration: TimeInterval
     public let errors: [SyncError]
+    /// Operations skipped because a checkpoint showed them already applied (resume, #8).
+    public let skippedCount: Int
+    /// True when the run stopped early because its task was cancelled (#12).
+    public let cancelled: Bool
+    /// Sync run this result belongs to; pass it to `merge-cli resume --run-id`.
+    public let runID: String?
 
     public init(
         totalOps: Int,
         successCount: Int,
         failureCount: Int,
         duration: TimeInterval,
-        errors: [SyncError] = []
+        errors: [SyncError] = [],
+        skippedCount: Int = 0,
+        cancelled: Bool = false,
+        runID: String? = nil
     ) {
         self.totalOps = totalOps
         self.successCount = successCount
         self.failureCount = failureCount
         self.duration = duration
         self.errors = errors
+        self.skippedCount = skippedCount
+        self.cancelled = cancelled
+        self.runID = runID
     }
 
     /// Success rate as percentage

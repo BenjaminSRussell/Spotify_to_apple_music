@@ -148,6 +148,41 @@ swift run merge-cli sync --direction spotify-to-apple
 swift run merge-cli sync --direction spotify-to-apple --auto-threshold 0.90
 ```
 
+#### Resume, cancel, and rollback (#8, #12)
+
+Every sync gets a run ID. Each operation is checkpointed as it is applied (`sync_checkpoints`),
+remote calls go through the rate limiter, and HTTP 429/5xx responses are retried with
+exponential backoff (a `Retry-After` header is honoured, capped at 5 minutes).
+
+```bash
+# Ctrl-C during a sync cancels cooperatively: in-flight calls finish, no new calls start,
+# and the run is saved as "cancelled".
+swift run merge-cli sync --direction spotify-to-apple
+
+# Continue the most recent cancelled/failed run (or pass --run-id). Operations already
+# applied are skipped; failed ones are retried.
+swift run merge-cli resume
+swift run merge-cli resume --run-id <RUN_ID>
+
+# Undo the playlist membership changes a run made (previous members are stored per update).
+swift run merge-cli rollback --run-id <RUN_ID>
+```
+
+**Partial state after a failure.** Operations that finished before the failure stay applied
+and checkpointed as `done`; the failing ones are checkpointed as `failed` with the error, and
+the run is marked `failed`. Playlist member updates are full replacements, so re-applying one
+on resume is safe. The sync summary prints the exact `resume` / `rollback` commands.
+
+**Incremental sync.** After a playlist is written, the digest of its member list is stored
+per service (`playlist_sync_state`). The next diff drops playlists whose members have not
+changed, so a second sync of an unchanged library performs no writes; a changed playlist
+produces a single member update rather than a re-create.
+
+In the macOS app, the Sync screen shows the current playlist (name, "Playlist N of M") and
+operation counts, has a **Cancel Sync** button (Esc), offers **Resume Sync** for cancelled or
+partially failed runs, and posts VoiceOver announcements when a new playlist starts and when
+the sync finishes or is cancelled.
+
 #### 4. Export Match Metrics (#9)
 
 Every match decision made during a diff or sync is stored in `match_outcomes`, tagged with the sync run's ID. Dry runs are recorded too. Export them for threshold tuning:
