@@ -5,15 +5,21 @@ import FoundationNetworking
 
 /// Minimal HTTP seam so API clients can be tested with recorded fixtures (no live creds in CI).
 public protocol HTTPTransport: Sendable {
-    func get(_ url: URL, headers: [String: String]) async throws -> (Data, HTTPURLResponse)
+    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse)
+}
+
+extension HTTPTransport {
+    public func get(_ url: URL, headers: [String: String]) async throws -> (Data, HTTPURLResponse) {
+        var request = URLRequest(url: url)
+        for (name, value) in headers { request.setValue(value, forHTTPHeaderField: name) }
+        return try await send(request)
+    }
 }
 
 public struct URLSessionTransport: HTTPTransport {
     public init() {}
 
-    public func get(_ url: URL, headers: [String: String]) async throws -> (Data, HTTPURLResponse) {
-        var request = URLRequest(url: url)
-        for (name, value) in headers { request.setValue(value, forHTTPHeaderField: name) }
+    public func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         // Callback API works on both Darwin and swift-corelibs-foundation.
         return try await withCheckedThrowingContinuation { continuation in
             URLSession.shared.dataTask(with: request) { data, response, error in
@@ -36,7 +42,13 @@ extension HTTPTransport {
     /// GET + status handling shared by the API clients. 429/5xx become `HTTPError`
     /// (with `Retry-After`) so `RetryPolicy` can back off.
     func getJSON(_ url: URL, headers: [String: String]) async throws -> Data {
-        let (data, response) = try await get(url, headers: headers)
+        var request = URLRequest(url: url)
+        for (name, value) in headers { request.setValue(value, forHTTPHeaderField: name) }
+        return try await sendChecked(request)
+    }
+
+    func sendChecked(_ request: URLRequest) async throws -> Data {
+        let (data, response) = try await send(request)
         guard (200..<300).contains(response.statusCode) else {
             let retryAfter = (response.value(forHTTPHeaderField: "Retry-After")).flatMap(TimeInterval.init)
             throw HTTPError(statusCode: response.statusCode, message: String(data: data.prefix(200), encoding: .utf8), retryAfter: retryAfter)

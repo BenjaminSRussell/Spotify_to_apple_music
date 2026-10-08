@@ -27,6 +27,9 @@ extension MergeCLI {
         @Flag(name: .long, help: "Import from Apple Music")
         var apple: Bool = false
 
+        @Flag(name: .long, help: "Fetch from the API and show what would be imported, without writing to the database")
+        var dryRun: Bool = false
+
         func run() async throws {
             Log.info("🎵 Spotify to Apple Music Migration CLI v0.1.0")
             Log.info("")
@@ -41,7 +44,7 @@ extension MergeCLI {
             // Import from Spotify
             if spotify {
                 do {
-                    try await coordinator.importFromSpotify()
+                    print(try await coordinator.importFromSpotify(dryRun: dryRun).summary)
                 } catch {
                     Log.error("Spotify import failed", error: error)
                     throw error
@@ -51,12 +54,14 @@ extension MergeCLI {
             // Import from Apple Music
             if apple {
                 do {
-                    try await coordinator.importFromAppleMusic()
+                    print(try await coordinator.importFromAppleMusic(dryRun: dryRun).summary)
                 } catch {
                     Log.error("Apple Music import failed", error: error)
                     throw error
                 }
             }
+
+            if dryRun { return }
 
             // Print summary
             Log.info("")
@@ -227,8 +232,42 @@ extension MergeCLI {
     struct Auth: ParsableCommand {
         static let configuration = CommandConfiguration(
             abstract: "Inspect or reset stored OAuth credentials (macOS Keychain)",
-            subcommands: [Status.self, Reset.self]
+            subcommands: [Login.self, Status.self, Reset.self]
         )
+
+        struct Login: AsyncParsableCommand {
+            static let configuration = CommandConfiguration(
+                abstract: "Sign in: Spotify via OAuth (PKCE), Apple Music via MusicKit or APPLE_MUSIC_USER_TOKEN"
+            )
+
+            @Flag(name: .long, help: "Sign in to Spotify (needs SPOTIFY_CLIENT_ID)")
+            var spotify: Bool = false
+
+            @Flag(name: .long, help: "Authorize Apple Music")
+            var apple: Bool = false
+
+            func run() async throws {
+                guard spotify || apple else {
+                    Log.error("Please specify --spotify and/or --apple")
+                    throw ExitCode.validationFailure
+                }
+                if spotify {
+                    let auth = SpotifyAuthServiceImpl(prompt: { url in
+                        print("1. Open this URL and approve access:\n\n   \(url.absoluteString)\n")
+                        print("2. Paste the full URL your browser was redirected to:")
+                        print("> ", terminator: "")
+                        guard let line = readLine() else { throw SpotifyOAuthError.missingCode }
+                        return line
+                    })
+                    try await auth.authorize()
+                    print("✅ Spotify signed in (tokens stored in the Keychain)")
+                }
+                if apple {
+                    try await AppleAuthServiceImpl().requestAuthorization()
+                    print("✅ Apple Music authorized")
+                }
+            }
+        }
 
         struct Status: ParsableCommand {
             static let configuration = CommandConfiguration(abstract: "Show which services have stored tokens (values are never printed)")

@@ -10,8 +10,9 @@ private struct FixtureTransport: HTTPTransport {
     var headers: [String: String] = [:]
     let onRequest: @Sendable (URL, [String: String]) -> Void
 
-    func get(_ url: URL, headers requestHeaders: [String: String]) async throws -> (Data, HTTPURLResponse) {
-        onRequest(url, requestHeaders)
+    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        let url = request.url!
+        onRequest(url, request.allHTTPHeaderFields ?? [:])
         let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: headers)!
         return (Data(body.utf8), response)
     }

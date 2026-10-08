@@ -39,30 +39,9 @@ public final class SpotifySearchServiceImpl: SpotifySearchService {
 
     static func parse(_ data: Data) throws -> [SpotifyTrackRef] {
         struct Response: Decodable {
-            struct Tracks: Decodable { let items: [Item] }
-            struct Item: Decodable {
-                struct Artist: Decodable { let name: String }
-                struct Album: Decodable { let name: String? }
-                let id: String
-                let name: String
-                let artists: [Artist]
-                let album: Album?
-                let duration_ms: Int?
-                let explicit: Bool?
-                let external_ids: [String: String]?
-            }
+            struct Tracks: Decodable { let items: [SpotifyAPITrack] }
             let tracks: Tracks
         }
-        return try JSONDecoder().decode(Response.self, from: data).tracks.items.map {
-            SpotifyTrackRef(
-                id: $0.id,
-                name: $0.name,
-                artistNames: $0.artists.map(\.name),
-                albumName: $0.album?.name,
-                durationMs: $0.duration_ms,
-                isExplicit: $0.explicit,
-                isrc: $0.external_ids?["isrc"]
-            )
-        }
+        return try JSONDecoder().decode(Response.self, from: data).tracks.items.compactMap(\.ref)
     }
 }
