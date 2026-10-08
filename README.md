@@ -267,6 +267,19 @@ Test fixtures include 12 tracks covering:
 
 See `Tests/MergeCoreTests/TestFixtures.swift` for full dataset.
 
+## Security: OAuth credentials (#11)
+
+- **OAuth tokens live in the macOS Keychain, never in plaintext files.** `KeychainCredentialStore` (`Sources/MergeCore/Security/CredentialStore.swift`) stores one generic-password item per service:
+  - service `com.benjaminsrussell.SpotifyAppleMerge.oauth`, account `spotify` / `appleMusic`;
+  - JSON-encoded tokens, `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`, so items are not synced to iCloud and not restorable to another device.
+- There is no file-backed `CredentialStore`. Tests inject `InMemoryCredentialStore`. On non-Apple platforms the default is in-memory, so tokens last only for the process.
+- Token values are never logged. Use `OAuthTokens.redactedDescription`.
+- **Reset procedure.** Use either of these:
+  - `merge-cli auth status` shows which services have tokens (never the values);
+  - `merge-cli auth reset [--service spotify|apple-music|all]` deletes them, and the next import asks you to sign in again.
+  - Or open Keychain Access and delete the items named "SpotifyAppleMerge … OAuth".
+- Apple Music authorization is granted to the app by MusicKit and managed by macOS (System Settings › Privacy & Security › Media & Apple Music). The app doesn't store an Apple Music user token itself.
+
 ## Database
 
 ### Schema
