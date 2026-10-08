@@ -10,18 +10,19 @@ public final class SyncCoordinator: Sendable {
 
     public init(
         trackStore: TrackStore = TrackStoreImpl(),
-        playlistStore: PlaylistStore = PlaylistStoreImpl()
+        playlistStore: PlaylistStore = PlaylistStoreImpl(),
+        outcomeStore: MatchOutcomeStore? = MatchOutcomeStoreImpl()
     ) {
         self.trackStore = trackStore
         self.playlistStore = playlistStore
-        self.diffComputer = DiffComputer()
+        self.diffComputer = DiffComputer(matchEngine: MatchEngine(trackStore: trackStore), outcomeStore: outcomeStore)
         self.syncExecutor = SyncExecutor(trackStore: trackStore, playlistStore: playlistStore)
     }
 
     // MARK: - Diff Operations
 
     /// Compute diff for given direction
-    public func computeDiff(direction: MergeDirection) async throws -> LibraryDiff {
+    public func computeDiff(direction: MergeDirection, runID: String? = nil) async throws -> LibraryDiff {
         Log.info("📊 Computing library diff...")
         Log.info("Direction: \(direction.rawValue)")
 
@@ -32,24 +33,28 @@ public final class SyncCoordinator: Sendable {
         case .spotifyToApple:
             return try await computeSpotifyToAppleDiff(
                 tracks: allTracks,
-                playlists: allPlaylists
+                playlists: allPlaylists,
+                runID: runID
             )
 
         case .appleToSpotify:
             return try await computeAppleToSpotifyDiff(
                 tracks: allTracks,
-                playlists: allPlaylists
+                playlists: allPlaylists,
+                runID: runID
             )
 
         case .bidirectional:
             // For bidirectional, compute both and merge
             let spotifyToApple = try await computeSpotifyToAppleDiff(
                 tracks: allTracks,
-                playlists: allPlaylists
+                playlists: allPlaylists,
+                runID: runID
             )
             let appleToSpotify = try await computeAppleToSpotifyDiff(
                 tracks: allTracks,
-                playlists: allPlaylists
+                playlists: allPlaylists,
+                runID: runID
             )
 
             return LibraryDiff(
@@ -76,8 +81,9 @@ public final class SyncCoordinator: Sendable {
         dryRun: Bool = false,
         autoThreshold: Double = 0.85
     ) async throws -> SyncResult {
-        // Step 1: Compute diff
-        let diff = try await computeDiff(direction: direction)
+        // Step 1: Compute diff (match decisions are recorded under this run, #9)
+        let runID = UUID().uuidString
+        let diff = try await computeDiff(direction: direction, runID: runID)
 
         // Step 2: Display summary
         let summary = generateDiffSummary(diff: diff, direction: direction)
@@ -97,7 +103,8 @@ public final class SyncCoordinator: Sendable {
         let result = try await syncExecutor.execute(
             diff: diff,
             direction: direction,
-            dryRun: dryRun
+            dryRun: dryRun,
+            runID: runID
         )
 
         // Step 4: Display results
@@ -116,7 +123,8 @@ public final class SyncCoordinator: Sendable {
     /// Compute diff for Spotify → Apple Music
     private func computeSpotifyToAppleDiff(
         tracks: [CanonicalTrack],
-        playlists: [CanonicalPlaylist]
+        playlists: [CanonicalPlaylist],
+        runID: String?
     ) async throws -> LibraryDiff {
         // Filter to Spotify-only tracks
         let spotifyTracks = tracks.filter { $0.availability.contains(.spotify) }
@@ -125,14 +133,16 @@ public final class SyncCoordinator: Sendable {
         return try await diffComputer.computeLibraryDiff(
             sourceTracks: spotifyTracks,
             sourcePlaylists: spotifyPlaylists,
-            targetService: .appleMusic
+            targetService: .appleMusic,
+            runID: runID
         )
     }
 
     /// Compute diff for Apple Music → Spotify
     private func computeAppleToSpotifyDiff(
         tracks: [CanonicalTrack],
-        playlists: [CanonicalPlaylist]
+        playlists: [CanonicalPlaylist],
+        runID: String?
     ) async throws -> LibraryDiff {
         // Filter to Apple-only tracks
         let appleTracks = tracks.filter { $0.availability.contains(.appleMusic) }
@@ -141,7 +151,8 @@ public final class SyncCoordinator: Sendable {
         return try await diffComputer.computeLibraryDiff(
             sourceTracks: appleTracks,
             sourcePlaylists: applePlaylists,
-            targetService: .spotify
+            targetService: .spotify,
+            runID: runID
         )
     }
 

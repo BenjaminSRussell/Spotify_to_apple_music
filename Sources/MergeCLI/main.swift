@@ -8,7 +8,7 @@ struct MergeCLI: AsyncParsableCommand {
         commandName: "merge-cli",
         abstract: "Spotify to Apple Music migration tool",
         version: "0.1.0",
-        subcommands: [Import.self, Diff.self, Sync.self, Auth.self],
+        subcommands: [Import.self, Diff.self, Sync.self, ExportMetrics.self, Auth.self],
         defaultSubcommand: nil
     )
 }
@@ -172,6 +172,48 @@ extension MergeCLI {
                 Log.error("Sync failed", error: error)
                 throw error
             }
+        }
+    }
+}
+
+// MARK: - Export Metrics Command (#9)
+
+extension MergeCLI {
+    struct ExportMetrics: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "export-metrics",
+            abstract: "Export per-run sync counts and match-confidence histograms as CSV"
+        )
+
+        @Option(name: .long, help: "Runs CSV path; the histogram goes next to it as <name>.histogram.csv")
+        var out: String
+
+        @Option(name: .long, help: "SQLite database (default: the app database in Application Support)")
+        var db: String?
+
+        @Option(name: .long, help: "Number of equal-width confidence buckets over [0, 1]")
+        var buckets: Int = 10
+
+        func validate() throws {
+            let ext = URL(fileURLWithPath: out).pathExtension.lowercased()
+            if ext == "parquet" {
+                throw ValidationError("""
+                    Parquet is not written natively. Export CSV and convert, e.g.:
+                      python -c "import pandas as p; p.read_csv('report.csv').to_parquet('report.parquet')"
+                    """)
+            }
+            guard ext == "csv" else { throw ValidationError("--out must end in .csv") }
+            guard buckets >= 1 else { throw ValidationError("--buckets must be >= 1") }
+        }
+
+        func run() throws {
+            let provider = try db.map { try DatabaseProvider(path: $0) } ?? DatabaseProvider.createDefault()
+            let runsURL = URL(fileURLWithPath: out)
+            let histURL = MetricsExporter.histogramURL(for: runsURL)
+            let exporter = MetricsExporter(dbQueue: provider.dbQueue, bucketCount: buckets)
+            try exporter.writeCSV(runsURL: runsURL, histogramURL: histURL)
+            print("Wrote \(runsURL.path)")
+            print("Wrote \(histURL.path)")
         }
     }
 }

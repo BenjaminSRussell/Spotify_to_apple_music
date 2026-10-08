@@ -27,12 +27,14 @@ public final class SyncExecutor: Sendable {
     public func execute(
         diff: LibraryDiff,
         direction: MergeDirection,
-        dryRun: Bool = false
+        dryRun: Bool = false,
+        runID: String? = nil
     ) async throws -> SyncResult {
         let startTime = Date()
 
-        // Create sync run record
+        // Create sync run record (runID links it to the match outcomes recorded during diff, #9)
         let syncRun = SyncRun(
+            id: runID ?? UUID().uuidString,
             direction: direction,
             operationsCount: diff.totalOperations
         )

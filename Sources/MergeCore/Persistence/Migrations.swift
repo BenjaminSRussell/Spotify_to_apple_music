@@ -108,6 +108,23 @@ public enum Migrations {
                 """)
         }
 
+        // Migration v4: persisted match decisions for metrics export (#9).
+        migrator.registerMigration("v4_match_outcomes") { db in
+            try db.create(table: "match_outcomes") { t in
+                t.autoIncrementedPrimaryKey("id")
+                t.column("run_id", .text)
+                t.column("recorded_at", .datetime).notNull()
+                t.column("source_service", .text).notNull()
+                t.column("target_service", .text).notNull()
+                t.column("source_track_id", .text).notNull()
+                t.column("decision", .text).notNull()
+                t.column("method", .text)
+                t.column("top_score", .double)
+                t.column("candidate_count", .integer).notNull()
+            }
+            try db.create(index: "idx_match_outcomes_run", on: "match_outcomes", columns: ["run_id"])
+        }
+
         try migrator.migrate(db)
     }
 }

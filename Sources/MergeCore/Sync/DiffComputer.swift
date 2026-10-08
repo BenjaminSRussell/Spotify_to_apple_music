@@ -8,9 +8,12 @@ import Foundation
 /// no-op sync; it has been removed.
 public struct DiffComputer: Sendable {
     private let matchEngine: MatchEngine
+    /// When set, every match decision is persisted for `merge-cli export-metrics` (#9)
+    private let outcomeStore: MatchOutcomeStore?
 
-    public init(matchEngine: MatchEngine = MatchEngine()) {
+    public init(matchEngine: MatchEngine = MatchEngine(), outcomeStore: MatchOutcomeStore? = nil) {
         self.matchEngine = matchEngine
+        self.outcomeStore = outcomeStore
     }
 
     // MARK: - Diff Computation
@@ -18,9 +21,11 @@ public struct DiffComputer: Sendable {
     /// Compute diff for tracks from source to target service
     public func computeTrackDiff(
         sourceTracks: [CanonicalTrack],
-        targetService: MusicService
+        targetService: MusicService,
+        runID: String? = nil
     ) async throws -> [SyncOperation] {
         var operations: [SyncOperation] = []
+        var outcomes: [MatchOutcome] = []
 
         Log.info("Computing track diff for \(sourceTracks.count) source tracks...")
 
@@ -38,6 +43,9 @@ public struct DiffComputer: Sendable {
                 decision = try await matchEngine.matchSpotifyTrackToApple(sourceTrack)
             } else {
                 decision = try await matchEngine.matchAppleTrackToSpotify(sourceTrack)
+            }
+            if outcomeStore != nil {
+                outcomes.append(MatchOutcome(decision: decision, source: sourceTrack, targetService: targetService, runID: runID))
             }
 
             switch decision {
@@ -58,6 +66,10 @@ public struct DiffComputer: Sendable {
                 )
                 operations.append(operation)
             }
+        }
+
+        if let store = outcomeStore {
+            try await store.record(outcomes)
         }
 
         Log.info("Generated \(operations.count) track operations")
@@ -109,11 +121,13 @@ public struct DiffComputer: Sendable {
         sourceTracks: [CanonicalTrack],
         sourcePlaylists: [CanonicalPlaylist],
         targetPlaylists: [CanonicalPlaylist] = [],
-        targetService: MusicService
+        targetService: MusicService,
+        runID: String? = nil
     ) async throws -> LibraryDiff {
         let trackOps = try await computeTrackDiff(
             sourceTracks: sourceTracks,
-            targetService: targetService
+            targetService: targetService,
+            runID: runID
         )
 
         let playlistOps = try await computePlaylistDiff(
