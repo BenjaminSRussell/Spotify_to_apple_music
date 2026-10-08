@@ -396,47 +396,62 @@ Settings persist across launches via `@AppStorage`.
 - Batch database operations
 - Async/await for concurrency
 
-## API Integration Status
+## API Integration (#6)
 
-### Current Implementation
+Both services are wired end to end: OAuth/authorization, then paginated library reads, then
+`ImportCoordinator`, then `merge-cli import`. All HTTP goes through `HTTPTransport`, and the
+tests replay recorded JSON responses (`APIIntegrationTests`), so CI never needs live credentials.
+Tokens are kept only in the macOS Keychain via `CredentialStore` (#11), never in files or logs.
 
-- ✅ Complete architecture and abstractions
-- ✅ Service protocol interfaces
-- ✅ OAuth flow placeholders
-- ⚠️ API calls are stubbed (TODO comments show exact implementation)
+### Spotify setup
 
-### Spotify API
+1. Create an app at <https://developer.spotify.com/dashboard>.
+2. Add the redirect URI `http://127.0.0.1:8888/callback`, or set your own in `SPOTIFY_REDIRECT_URI`.
+3. Export the client ID. No client secret is needed, because the app uses Authorization Code + PKCE.
 
-Located in `Sources/MergeCore/Integrations/Spotify/`:
-- `SpotifyAuthService.swift` - OAuth flow ready for implementation
-- `SpotifyLibraryService.swift` - Pagination patterns documented
-
-```swift
-// TODO: Real implementation
-try await spotify.currentUserProfile()
-let tracks = try await spotify.library.savedTracks()
+```bash
+export SPOTIFY_CLIENT_ID=<your client id>
+swift run merge-cli auth login --spotify           # open the printed URL, then paste the redirect URL back
+swift run merge-cli import --spotify --dry-run     # fetch and show what would be imported; writes nothing
+swift run merge-cli import --spotify               # populate canonical_tracks and playlists
 ```
 
-### Apple Music API
+Scopes: `user-library-read`, `playlist-read-private`, `playlist-read-collaborative`. Access
+tokens are refreshed automatically when they expire (`SpotifyAuthServiceImpl.validAccessToken()`).
+Saved tracks and playlists follow Spotify's `next` links. Local files and removed tracks are
+skipped. 429/5xx responses are retried with backoff and honour `Retry-After`.
 
-Located in `Sources/MergeCore/Integrations/AppleMusic/`:
-- `AppleAuthService.swift` - MusicKit authorization patterns
-- `AppleLibraryService.swift` - MusadoraKit usage examples
+### Apple Music setup
 
-```swift
-// TODO: Real implementation
-let status = await MusicAuthorization.request()
-let library = try await MLLibrary.shared.songs()
+There are two ways to read the library:
+
+- **MusicKit (macOS 14+)**: `merge-cli auth login --apple` calls `MusicAuthorization.request()`.
+  The library is then read with `MusicLibraryRequest`. This needs an app or bundle with the
+  MusicKit capability enabled in App Store Connect; a bare command-line binary may be refused by
+  the system.
+- **Apple Music API (any platform, including CI)**: create a MusicKit key in App Store Connect,
+  generate a developer token (JWT), and get a Music User Token for your account. Then:
+
+```bash
+export APPLE_MUSIC_DEVELOPER_TOKEN=<developer JWT>
+export APPLE_MUSIC_USER_TOKEN=<music user token>
+swift run merge-cli auth login --apple             # stores the user token in the Keychain
+swift run merge-cli import --apple --dry-run
+swift run merge-cli import --apple
 ```
+
+The REST path reads `/v1/me/library/songs` and `/v1/me/library/playlists` (with their tracks),
+following Apple's relative `next` links. It prefers catalog IDs, so the same song lines up
+across libraries.
 
 ## Roadmap
 
 ### Phase 7: Hardening & Polish (Next)
 
-- [ ] Real Spotify OAuth implementation
-- [ ] Real Apple Music MusicKit integration
-- [ ] Retry logic with exponential backoff
-- [ ] Rate limiting and throttling
+- [x] Real Spotify OAuth implementation (#6)
+- [x] Real Apple Music MusicKit integration (#6)
+- [x] Retry logic with exponential backoff (#8)
+- [x] Rate limiting and throttling (#8)
 - [ ] Parallel execution for performance
 - [ ] Incremental sync (change detection)
 - [ ] Conflict resolution strategies

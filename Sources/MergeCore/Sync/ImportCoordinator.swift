@@ -28,7 +28,9 @@ public final class ImportCoordinator: Sendable {
     // MARK: - Spotify Import
 
     /// Import all saved tracks and playlists from Spotify
-    public func importFromSpotify() async throws {
+    /// - Parameter dryRun: Fetch and normalize everything but write nothing; returns what would be imported.
+    @discardableResult
+    public func importFromSpotify(dryRun: Bool = false) async throws -> ImportReport {
         Log.info("🎵 Starting Spotify import...")
 
         // Ensure authorization
@@ -46,11 +48,14 @@ public final class ImportCoordinator: Sendable {
         let canonicalTracks = Normalizer.toCanonical(spotifyTracks: spotifyTracks)
 
         // Save to database
-        Log.info("Saving \(canonicalTracks.count) tracks to database...")
-        try await trackStore.saveAll(canonicalTracks)
-        Log.info("✅ Saved \(canonicalTracks.count) Spotify tracks")
+        if !dryRun {
+            Log.info("Saving \(canonicalTracks.count) tracks to database...")
+            try await trackStore.saveAll(canonicalTracks)
+        }
+        Log.info(dryRun ? "🔍 Dry run: would save \(canonicalTracks.count) Spotify tracks" : "✅ Saved \(canonicalTracks.count) Spotify tracks")
 
         // Fetch playlists
+        var playlistTrackCount = 0
         Log.info("Fetching Spotify playlists...")
         let spotifyPlaylists = try await spotifyLibrary.fetchPlaylists()
         Log.info("Fetched \(spotifyPlaylists.count) playlists from Spotify")
@@ -59,6 +64,10 @@ public final class ImportCoordinator: Sendable {
         for spotifyPlaylist in spotifyPlaylists {
             // Extract and save tracks from playlist
             let playlistTracks = Normalizer.extractTracksFromPlaylist(spotifyPlaylist: spotifyPlaylist)
+            if dryRun {
+                playlistTrackCount += playlistTracks.count
+                continue
+            }
             try await trackStore.saveAll(playlistTracks)
 
             // Convert and save playlist
@@ -71,12 +80,16 @@ public final class ImportCoordinator: Sendable {
         Log.info("✅ Spotify import complete!")
         Log.info("   Tracks: \(canonicalTracks.count)")
         Log.info("   Playlists: \(spotifyPlaylists.count)")
+        return ImportReport(service: .spotify, dryRun: dryRun, tracks: canonicalTracks,
+                            playlistCount: spotifyPlaylists.count, playlistTrackCount: playlistTrackCount)
     }
 
     // MARK: - Apple Music Import
 
     /// Import all library songs and playlists from Apple Music
-    public func importFromAppleMusic() async throws {
+    /// - Parameter dryRun: Fetch and normalize everything but write nothing; returns what would be imported.
+    @discardableResult
+    public func importFromAppleMusic(dryRun: Bool = false) async throws -> ImportReport {
         Log.info("🍎 Starting Apple Music import...")
 
         // Ensure authorization
@@ -94,11 +107,14 @@ public final class ImportCoordinator: Sendable {
         let canonicalTracks = Normalizer.toCanonical(appleTracks: appleTracks)
 
         // Save to database
-        Log.info("Saving \(canonicalTracks.count) tracks to database...")
-        try await trackStore.saveAll(canonicalTracks)
-        Log.info("✅ Saved \(canonicalTracks.count) Apple Music tracks")
+        if !dryRun {
+            Log.info("Saving \(canonicalTracks.count) tracks to database...")
+            try await trackStore.saveAll(canonicalTracks)
+        }
+        Log.info(dryRun ? "🔍 Dry run: would save \(canonicalTracks.count) Apple Music tracks" : "✅ Saved \(canonicalTracks.count) Apple Music tracks")
 
         // Fetch playlists
+        var playlistTrackCount = 0
         Log.info("Fetching Apple Music playlists...")
         let applePlaylists = try await appleLibrary.fetchPlaylists()
         Log.info("Fetched \(applePlaylists.count) playlists from Apple Music")
@@ -107,6 +123,10 @@ public final class ImportCoordinator: Sendable {
         for applePlaylist in applePlaylists {
             // Extract and save tracks from playlist
             let playlistTracks = Normalizer.extractTracksFromPlaylist(applePlaylist: applePlaylist)
+            if dryRun {
+                playlistTrackCount += playlistTracks.count
+                continue
+            }
             try await trackStore.saveAll(playlistTracks)
 
             // Convert and save playlist
@@ -119,6 +139,8 @@ public final class ImportCoordinator: Sendable {
         Log.info("✅ Apple Music import complete!")
         Log.info("   Tracks: \(canonicalTracks.count)")
         Log.info("   Playlists: \(applePlaylists.count)")
+        return ImportReport(service: .appleMusic, dryRun: dryRun, tracks: canonicalTracks,
+                            playlistCount: applePlaylists.count, playlistTrackCount: playlistTrackCount)
     }
 
     // MARK: - Import Summary
@@ -163,5 +185,27 @@ public struct ImportSummary: Sendable {
         Already Matched: \(matchedTracks)
         Total Playlists: \(totalPlaylists)
         """
+    }
+}
+
+/// What an import fetched (and, unless `dryRun`, saved) (#6).
+public struct ImportReport: Sendable {
+    public let service: MusicService
+    public let dryRun: Bool
+    public let tracks: [CanonicalTrack]
+    public let playlistCount: Int
+    public let playlistTrackCount: Int
+
+    public var summary: String {
+        var lines = [
+            "\(dryRun ? "🔍 Dry run — nothing written" : "✅ Imported") from \(service == .spotify ? "Spotify" : "Apple Music")",
+            "  Library tracks: \(tracks.count)",
+            "  Playlists: \(playlistCount)" + (dryRun ? " (\(playlistTrackCount) playlist entries)" : "")
+        ]
+        for track in tracks.prefix(5) {
+            lines.append("    • \(track.title) — \(track.artist)")
+        }
+        if tracks.count > 5 { lines.append("    … and \(tracks.count - 5) more") }
+        return lines.joined(separator: "\n")
     }
 }

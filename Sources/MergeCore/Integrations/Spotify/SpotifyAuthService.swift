@@ -1,5 +1,4 @@
 import Foundation
-// import SpotifyAPI  // Uncomment when implementing
 
 /// Protocol for Spotify authentication
 public protocol SpotifyAuthService: Sendable {
@@ -8,80 +7,68 @@ public protocol SpotifyAuthService: Sendable {
     var isAuthorized: Bool { get async }
     /// Remove stored tokens (sign out)
     func signOut() async throws
+    /// A non-expired access token, refreshing (and persisting) it first if needed.
+    func validAccessToken() async throws -> String
 }
 
-/// Spotify authentication implementation using SpotifyAPI
-public final class SpotifyAuthServiceImpl: SpotifyAuthService {
-    // TODO: Add SpotifyAPI instance
-    // private let spotify: SpotifyAPI<AuthorizationCodeFlowManager>
+/// Shows the authorization URL and returns the redirect URL the user landed on.
+/// The CLI prints the URL and reads the pasted redirect; the app can use a web view.
+public typealias AuthorizationPrompt = @Sendable (_ authorizationURL: URL) async throws -> String
 
+/// Spotify Authorization Code + PKCE flow with Keychain-backed tokens (#6, #11).
+public final class SpotifyAuthServiceImpl: SpotifyAuthService {
     /// Token persistence: Keychain in production, injectable for tests (#11)
     private let credentials: CredentialStore
+    private let client: SpotifyOAuthClient?
+    private let prompt: AuthorizationPrompt?
+    private let clock: @Sendable () -> Date
 
-    public init(credentials: CredentialStore = CredentialStores.platformDefault()) {
+    public init(
+        credentials: CredentialStore = CredentialStores.platformDefault(),
+        config: SpotifyOAuthConfig? = SpotifyOAuthConfig.fromEnvironment(),
+        transport: HTTPTransport = URLSessionTransport(),
+        prompt: AuthorizationPrompt? = nil,
+        clock: @escaping @Sendable () -> Date = { Date() }
+    ) {
         self.credentials = credentials
-        // TODO: Initialize SpotifyAPI with credentials
-        // self.spotify = SpotifyAPI(
-        //     authorizationManager: AuthorizationCodeFlowManager(
-        //         clientId: Configuration.spotifyClientID,
-        //         clientSecret: Configuration.spotifyClientSecret
-        //     )
-        // )
+        self.client = config.map { SpotifyOAuthClient(config: $0, transport: transport) }
+        self.prompt = prompt
+        self.clock = clock
     }
 
     public func authorize() async throws {
-        // TODO: Implement OAuth flow
-        //
-        // 1. Generate authorization URL with required scopes:
-        //    - user-library-read (for saved tracks)
-        //    - playlist-read-private (for playlists)
-        //    - user-read-private (for user info)
-        //
-        // 2. Open authorization URL in browser or present web view
-        //
-        // 3. Handle redirect with authorization code
-        //
-        // 4. Exchange code for access/refresh tokens:
-        //    try await spotify.authorizationManager.requestAccessAndRefreshTokens(code: code)
-        //
-        // 5. Store tokens in Keychain for persistence: try store(tokens)
-        //
-        // Example:
-        // let authURL = spotify.authorizationManager.makeAuthorizationURL(
-        //     redirectURI: URL(string: "spotifymerge://callback")!,
-        //     showDialog: true,
-        //     scopes: [
-        //         .userLibraryRead,
-        //         .playlistReadPrivate,
-        //         .userReadPrivate
-        //     ]
-        // )
-        // // Open authURL, wait for callback, get code
-        // try await spotify.authorizationManager.requestAccessAndRefreshTokens(code: code)
-
-        Log.info("Spotify authorization not yet implemented")
-        throw MergeError.authRequired(service: .spotify)
+        guard let client else { throw SpotifyOAuthError.notConfigured }
+        guard let prompt else {
+            Log.info("Run `merge-cli auth login --spotify` to sign in to Spotify")
+            throw MergeError.authRequired(service: .spotify)
+        }
+        let pkce = PKCEPair.generate()
+        let state = UUID().uuidString
+        let redirect = try await prompt(client.authorizationURL(state: state, pkce: pkce))
+        let code = try SpotifyOAuthClient.code(fromRedirect: redirect, expectedState: state)
+        try store(try await client.exchange(code: code, pkce: pkce, now: clock()))
     }
 
     public func refreshTokenIfNeeded() async throws {
-        // TODO: Implement token refresh
-        //
-        // 1. Check if current token is expired:
-        //    guard spotify.authorizationManager.isAuthorized(for: [.userLibraryRead]) else {
-        //        try await spotify.authorizationManager.refreshTokens()
-        //        return
-        //    }
-        //
-        // 2. Save refreshed tokens to Keychain
+        _ = try await validAccessToken()
+    }
 
-        Log.debug("Token refresh not yet implemented")
+    public func validAccessToken() async throws -> String {
+        guard let tokens = try credentials.load(for: .spotify) else {
+            throw MergeError.authRequired(service: .spotify)
+        }
+        guard tokens.isExpired(now: clock()) else { return tokens.accessToken }
+        guard let client else { throw SpotifyOAuthError.notConfigured }
+        let refreshed = try await client.refresh(tokens, now: clock())
+        try store(refreshed)
+        return refreshed.accessToken
     }
 
     /// Authorized when stored tokens exist and are either unexpired or refreshable
     public var isAuthorized: Bool {
         get async {
             guard let tokens = try? credentials.load(for: .spotify) else { return false }
-            return !tokens.isExpired() || tokens.refreshToken != nil
+            return !tokens.isExpired(now: clock()) || tokens.refreshToken != nil
         }
     }
 
@@ -95,4 +82,3 @@ public final class SpotifyAuthServiceImpl: SpotifyAuthService {
         try credentials.delete(for: .spotify)
     }
 }
-
