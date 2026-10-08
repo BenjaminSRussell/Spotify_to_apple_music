@@ -1,5 +1,9 @@
 import Foundation
+#if canImport(CryptoKit)
 import CryptoKit
+#else
+import Crypto
+#endif
 
 /// Utilities for normalizing and converting service-specific models to canonical models
 public struct Normalizer {

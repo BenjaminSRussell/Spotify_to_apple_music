@@ -348,7 +348,6 @@ final class PersistenceTests: XCTestCase {
         XCTAssertNotNil(fetched?.completedAt)
         XCTAssertEqual(fetched?.successCount, 48)
     }
-}
 
     func testSpotifyThenAppleImportMergesServiceIDs() async throws {
         let spotify = Normalizer.toCanonical(spotifyTrack: SpotifyTrackRef(
@@ -382,3 +381,4 @@ final class PersistenceTests: XCTestCase {
         XCTAssertTrue(row.availability.contains(.appleMusic))
         XCTAssertEqual(row.availability.rawValue, 3)
     }
+}

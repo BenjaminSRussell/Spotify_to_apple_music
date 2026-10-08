@@ -18,26 +18,14 @@ let package = Package(
         .executable(
             name: "merge-cli",
             targets: ["MergeCLI"]
-        ),
-        // macOS SwiftUI app
-        .executable(
-            name: "MergeApp",
-            targets: ["MergeApp"]
         )
     ],
     dependencies: [
-        // Spotify API client
-        .package(url: "https://github.com/Peter-Schorn/SpotifyAPI", from: "3.0.0"),
-
-        // Apple Music API wrapper
-        .package(url: "https://github.com/rryam/MusadoraKit", from: "4.0.0"),
-
-        // Fuzzy string matching
-        .package(url: "https://github.com/seanoshea/FuzzyMatchingSwift", from: "1.0.0"),
-        .package(url: "https://github.com/krisk/fuse-swift", from: "2.1.0"),
-
         // Database - SQLite with GRDB
         .package(url: "https://github.com/groue/GRDB.swift", from: "7.0.0"),
+
+        // SHA256 on Linux (CryptoKit is Apple-only); lets MergeCore + tests build anywhere
+        .package(url: "https://github.com/apple/swift-crypto", "3.0.0"..<"5.0.0"),
 
         // CLI argument parsing
         .package(url: "https://github.com/apple/swift-argument-parser", from: "1.5.0")
@@ -47,11 +35,8 @@ let package = Package(
         .target(
             name: "MergeCore",
             dependencies: [
-                .product(name: "SpotifyAPI", package: "SpotifyAPI"),
-                .product(name: "MusadoraKit", package: "MusadoraKit"),
-                .product(name: "FuzzyMatchingSwift", package: "FuzzyMatchingSwift"),
-                .product(name: "Fuse", package: "fuse-swift"),
-                .product(name: "GRDB", package: "GRDB.swift")
+                .product(name: "GRDB", package: "GRDB.swift"),
+                .product(name: "Crypto", package: "swift-crypto", condition: .when(platforms: [.linux]))
             ]
         ),
 
@@ -64,14 +49,6 @@ let package = Package(
             ]
         ),
 
-        // MergeApp - macOS SwiftUI application
-        .executableTarget(
-            name: "MergeApp",
-            dependencies: [
-                "MergeCore"
-            ]
-        ),
-
         // Tests
         .testTarget(
             name: "MergeCoreTests",
@@ -79,3 +56,10 @@ let package = Package(
         )
     ]
 )
+
+// MergeApp - macOS SwiftUI application. SwiftUI only exists on Apple platforms, so the
+// app is added on macOS only; MergeCore, MergeCLI and the tests also build on Linux.
+#if os(macOS)
+package.products.append(.executable(name: "MergeApp", targets: ["MergeApp"]))
+package.targets.append(.executableTarget(name: "MergeApp", dependencies: ["MergeCore"]))
+#endif

@@ -56,6 +56,9 @@ public struct CanonicalTrack: Codable, Sendable {
     }
 }
 
+/// `id` is already a stable Hashable key, so tracks can drive SwiftUI tables and lists.
+extension CanonicalTrack: Identifiable {}
+
 /// Flags indicating which services have this track
 public struct AvailabilityFlags: OptionSet, Codable, Sendable {
     public let rawValue: Int
@@ -66,6 +69,19 @@ public struct AvailabilityFlags: OptionSet, Codable, Sendable {
 
     public static let spotify    = AvailabilityFlags(rawValue: 1 << 0)
     public static let appleMusic = AvailabilityFlags(rawValue: 1 << 1)
+
+    /// Flag for a single service
+    public init(_ service: MusicService) {
+        switch service {
+        case .spotify: self = .spotify
+        case .appleMusic: self = .appleMusic
+        }
+    }
+
+    /// Whether the track is available on `service`
+    public func contains(_ service: MusicService) -> Bool {
+        contains(AvailabilityFlags(service))
+    }
 }
 
 // MARK: - Canonical Playlist Models

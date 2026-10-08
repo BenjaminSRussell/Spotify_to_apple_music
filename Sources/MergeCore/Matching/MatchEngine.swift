@@ -179,12 +179,12 @@ public final class MatchEngine: Sendable {
     public func matchTracks(
         sources: [CanonicalTrack],
         targetService: MusicService
-    ) async throws -> [CanonicalTrack: MatchDecision] {
-        var results: [CanonicalTrack: MatchDecision] = [:]
+    ) async throws -> [CanonicalTrackID: MatchDecision] {
+        var results: [CanonicalTrackID: MatchDecision] = [:]
 
         for source in sources {
             let decision = try await match(source: source, targetService: targetService)
-            results[source] = decision
+            results[source.id] = decision
         }
 
         return results

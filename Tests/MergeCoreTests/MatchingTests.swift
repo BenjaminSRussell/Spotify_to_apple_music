@@ -25,7 +25,7 @@ final class MatchingTests: XCTestCase {
 
         XCTAssertEqual(
             normalizer.normalizeArtist("Artist A & Artist B", extractPrimary: true),
-            "artist a  artist b"
+            "artist a artist b"
         )
     }
 

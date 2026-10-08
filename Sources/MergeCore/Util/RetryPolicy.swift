@@ -24,7 +24,7 @@ public actor RetryPolicy {
     /// Execute operation with exponential backoff retry
     public func execute<T>(
         operation: @Sendable () async throws -> T,
-        shouldRetry: ((Error) -> Bool)? = nil
+        shouldRetry: (@Sendable (Error) async -> Bool)? = nil
     ) async throws -> T {
         var lastError: Error?
         
@@ -41,7 +41,7 @@ public actor RetryPolicy {
                 lastError = error
                 
                 // Check if we should retry this error
-                if let shouldRetry = shouldRetry, !shouldRetry(error) {
+                if let shouldRetry = shouldRetry, !(await shouldRetry(error)) {
                     Log.debug("Error is not retryable: \(error)")
                     throw error
                 }

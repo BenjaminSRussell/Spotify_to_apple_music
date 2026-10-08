@@ -29,6 +29,9 @@ public struct StringSimilarity: Sendable {
     /// Calculate simple similarity between two strings (0.0 to 1.0)
     /// Uses normalized Levenshtein distance
     public func similarity(_ a: String, _ b: String) -> Double {
+        // Case-insensitive: "HELLO" and "hello" are the same title.
+        let a = a.lowercased()
+        let b = b.lowercased()
         if a == b {
             return 1.0
         }

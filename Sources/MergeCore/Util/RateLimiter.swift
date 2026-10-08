@@ -80,7 +80,7 @@ public actor RateLimiter {
     public func executeBatchParallel<T>(
         items: [T],
         maxConcurrency: Int = 5,
-        operation: @Sendable (T) async throws -> Void
+        operation: @escaping @Sendable (T) async throws -> Void
     ) async throws {
         try await withThrowingTaskGroup(of: Void.self) { group in
             var iterator = items.makeIterator()
