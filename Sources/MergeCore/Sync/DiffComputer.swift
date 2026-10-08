@@ -2,6 +2,10 @@ import Foundation
 
 /// Computes diffs between source and target libraries
 /// Generates sync operations based on matching results
+///
+/// This is the **single diff entrypoint** for MergeCore (#16). The old
+/// `LibraryDiffEngine` stub always returned an empty diff, which looked like a successful
+/// no-op sync; it has been removed.
 public struct DiffComputer: Sendable {
     private let matchEngine: MatchEngine
 
@@ -61,8 +65,14 @@ public struct DiffComputer: Sendable {
     }
 
     /// Compute diff for playlists from source to target service
+    ///
+    /// - Parameter targetPlaylists: Known state of playlists on the target service. A source
+    ///   playlist that already exists on the target is only updated when its members differ
+    ///   from the matching target playlist. If the target contents are unknown (not in this
+    ///   list), an update is emitted so the target is brought in line.
     public func computePlaylistDiff(
         sourcePlaylists: [CanonicalPlaylist],
+        targetPlaylists: [CanonicalPlaylist] = [],
         targetService: MusicService
     ) async throws -> [SyncOperation] {
         var operations: [SyncOperation] = []
@@ -75,6 +85,7 @@ public struct DiffComputer: Sendable {
                 // Playlist exists - check if tracks need updating
                 if let updateOp = createUpdatePlaylistOperation(
                     playlist: playlist,
+                    target: findTargetPlaylist(for: playlist, in: targetPlaylists, targetService: targetService),
                     targetService: targetService
                 ) {
                     operations.append(updateOp)
@@ -97,6 +108,7 @@ public struct DiffComputer: Sendable {
     public func computeLibraryDiff(
         sourceTracks: [CanonicalTrack],
         sourcePlaylists: [CanonicalPlaylist],
+        targetPlaylists: [CanonicalPlaylist] = [],
         targetService: MusicService
     ) async throws -> LibraryDiff {
         let trackOps = try await computeTrackDiff(
@@ -106,6 +118,7 @@ public struct DiffComputer: Sendable {
 
         let playlistOps = try await computePlaylistDiff(
             sourcePlaylists: sourcePlaylists,
+            targetPlaylists: targetPlaylists,
             targetService: targetService
         )
 
@@ -161,13 +174,32 @@ public struct DiffComputer: Sendable {
         }
     }
 
+    /// Find the target-side copy of `playlist`: same canonical ID, or same ID on the target service
+    private func findTargetPlaylist(
+        for playlist: CanonicalPlaylist,
+        in targetPlaylists: [CanonicalPlaylist],
+        targetService: MusicService
+    ) -> CanonicalPlaylist? {
+        if let byID = targetPlaylists.first(where: { $0.id == playlist.id }) {
+            return byID
+        }
+        let serviceID: (CanonicalPlaylist) -> String? = {
+            targetService == .appleMusic ? $0.sourceAppleID : $0.sourceSpotifyID
+        }
+        guard let wanted = serviceID(playlist) else { return nil }
+        return targetPlaylists.first { serviceID($0) == wanted }
+    }
+
     /// Create playlist update operation (if needed)
+    /// Returns nil when the known target playlist already has the same members in the same order.
     private func createUpdatePlaylistOperation(
         playlist: CanonicalPlaylist,
+        target: CanonicalPlaylist?,
         targetService: MusicService
     ) -> SyncOperation? {
-        // TODO: Check if playlist tracks differ from target
-        // For now, always update to ensure sync
+        if let target = target, target.trackIDs == playlist.trackIDs {
+            return nil
+        }
         switch targetService {
         case .appleMusic:
             return .updateApplePlaylistMembers(
@@ -229,6 +261,16 @@ public struct DiffComputer: Sendable {
         }
         if createSpotifyPlaylists > 0 {
             summary += "\n  - Create in Spotify: \(createSpotifyPlaylists)"
+        }
+
+        let updatePlaylists = diff.playlistOps.filter {
+            switch $0 {
+            case .updateApplePlaylistMembers, .updateSpotifyPlaylistMembers: return true
+            default: return false
+            }
+        }.count
+        if updatePlaylists > 0 {
+            summary += "\n  - Update members: \(updatePlaylists)"
         }
 
         summary += "\n\nTotal Operations: \(diff.totalOperations)"

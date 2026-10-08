@@ -34,9 +34,19 @@ SpotifyAppleMerge/
 ├── Tests/
 │   └── MergeCoreTests/
 │       ├── TestFixtures.swift    # Sample data for testing
+│       ├── DiffComputerTests.swift # Diff entrypoint: differing vs identical libraries
 │       └── EndToEndTests.swift   # Comprehensive integration tests
 └── docs/                       # Detailed documentation
 ```
+
+### Diff entrypoint
+
+**`DiffComputer` (`Sources/MergeCore/Sync/DiffComputer.swift`) is the only library diff API.** `SyncCoordinator` and the tests both call `computeLibraryDiff(sourceTracks:sourcePlaylists:targetPlaylists:targetService:)`.
+- Tracks already available on the target produce no op. Missing tracks are matched first; only tracks with no match get an `addTrackTo…` op.
+- Playlists missing on the target produce a `create…Playlist` op.
+- Playlists that exist on both are compared with the known target copy (`targetPlaylists`, matched by canonical ID or target-service ID), and `update…PlaylistMembers` is emitted only when the members or their order differ. If the target contents aren't known, an update is emitted.
+
+Identical libraries produce an empty diff. The old `LibraryDiffEngine` stub always returned an empty diff even when libraries differed, so it has been removed (#16).
 
 ### Technology Stack
 
