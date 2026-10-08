@@ -8,7 +8,7 @@ struct MergeCLI: AsyncParsableCommand {
         commandName: "merge-cli",
         abstract: "Spotify to Apple Music migration tool",
         version: "0.1.0",
-        subcommands: [Import.self, Diff.self, Sync.self, ExportMetrics.self, Auth.self],
+        subcommands: [Import.self, Diff.self, Sync.self, Resume.self, Rollback.self, ExportMetrics.self, Auth.self],
         defaultSubcommand: nil
     )
 }
@@ -159,13 +159,16 @@ extension MergeCLI {
             let coordinator = SyncCoordinator()
 
             do {
-                let result = try await coordinator.performSync(
-                    direction: mergeDirection,
-                    dryRun: dryRun,
-                    autoThreshold: autoThreshold
-                )
+                let result = try await runCancellableSync {
+                    try await coordinator.performSync(
+                        direction: mergeDirection,
+                        dryRun: dryRun,
+                        autoThreshold: autoThreshold,
+                        progress: printProgress
+                    )
+                }
 
-                if result.failureCount > 0 {
+                if result.cancelled || result.failureCount > 0 {
                     throw ExitCode.failure
                 }
             } catch {
@@ -262,4 +265,67 @@ extension MergeCLI {
             }
         }
     }
+}
+
+// MARK: - Resume / Rollback (#8, #12)
+
+extension MergeCLI {
+    struct Resume: AsyncParsableCommand {
+        static let configuration = CommandConfiguration(
+            abstract: "Resume a cancelled or failed sync, skipping operations already applied"
+        )
+
+        @Option(name: .long, help: "Run ID to resume (default: the most recent unfinished run)")
+        var runID: String?
+
+        func run() async throws {
+            let coordinator = SyncCoordinator()
+            let result = try await runCancellableSync {
+                try await coordinator.resumeSync(runID: runID, progress: printProgress)
+            }
+            if result.cancelled || result.failureCount > 0 {
+                throw ExitCode.failure
+            }
+        }
+    }
+
+    struct Rollback: AsyncParsableCommand {
+        static let configuration = CommandConfiguration(
+            abstract: "Restore playlist memberships changed by a sync run"
+        )
+
+        @Option(name: .long, help: "Run ID whose playlist edits should be undone")
+        var runID: String
+
+        func run() async throws {
+            let restored = try await SyncCoordinator().rollback(runID: runID)
+            print("Restored \(restored) playlist(s) from run \(runID)")
+        }
+    }
+}
+
+// MARK: - Progress + Ctrl-C
+
+/// Prints a status line whenever the sync moves to a new playlist or finishes.
+@Sendable func printProgress(_ progress: SyncProgress) {
+    guard progress.announcement != nil else { return }
+    FileHandle.standardError.write(Data((progress.statusLine + "\n").utf8))
+}
+
+/// Runs a sync in a child task and cancels it cooperatively on Ctrl-C (SIGINT):
+/// in-flight calls finish, the run is saved as cancelled, and `resume` picks it up.
+func runCancellableSync(_ body: @escaping @Sendable () async throws -> SyncResult) async throws -> SyncResult {
+    let task = Task { try await body() }
+    signal(SIGINT, SIG_IGN)
+    let source = DispatchSource.makeSignalSource(signal: SIGINT, queue: .global())
+    source.setEventHandler {
+        FileHandle.standardError.write(Data("\nCancelling after in-flight operations finish...\n".utf8))
+        task.cancel()
+    }
+    source.resume()
+    defer {
+        source.cancel()
+        signal(SIGINT, SIG_DFL)
+    }
+    return try await task.value
 }

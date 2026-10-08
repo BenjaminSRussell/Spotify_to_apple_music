@@ -21,6 +21,8 @@ public actor RateLimiter {
         await refillTokens()
         
         while tokens < Double(cost) {
+            // Cancelled callers return immediately; they re-check cancellation before calling out.
+            if Task.isCancelled { return }
             // Wait until we have enough tokens
             let timeNeeded = TimeInterval(Double(cost) - tokens) * refillRate
             Log.debug("Rate limit: waiting \(String(format: "%.2f", timeNeeded))s for \(cost) token(s)")
