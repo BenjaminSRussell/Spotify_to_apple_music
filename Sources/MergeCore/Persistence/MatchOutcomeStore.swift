@@ -53,6 +53,9 @@ public struct MatchOutcome: Codable, Equatable, Sendable {
         case .noMatch:
             self.init(runID: runID, recordedAt: date, sourceService: sourceService, targetService: targetService,
                       sourceTrackID: source.id.value, decision: "no_match", method: nil, topScore: nil, candidateCount: 0)
+        case .skipped:
+            self.init(runID: runID, recordedAt: date, sourceService: sourceService, targetService: targetService,
+                      sourceTrackID: source.id.value, decision: "skipped", method: nil, topScore: nil, candidateCount: 0)
         }
     }
 }

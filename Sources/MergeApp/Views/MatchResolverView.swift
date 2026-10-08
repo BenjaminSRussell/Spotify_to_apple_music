@@ -36,13 +36,22 @@ struct MatchResolverView: View {
                 } else {
                     List(matchState.ambiguousMatches, selection: $selectedMatchID) { match in
                         AmbiguousMatchRow(match: match)
+                            .accessibilityElement(children: .combine)
+                            .accessibilityLabel(match.pending.accessibilityLabel)
                     }
                 }
             }
         } detail: {
             // Match details and resolution
             if let match = selectedMatch {
-                MatchDetailView(match: match) { candidate in
+                MatchDetailView(match: match, onSkip: {
+                    Task {
+                        await matchState.skip(match)
+                        selectedMatchID = matchState.ambiguousMatches.first?.id
+                    }
+                }, onReject: { candidate in
+                    Task { await matchState.reject(candidate, in: match) }
+                }) { candidate in
                     Task {
                         // Show checkmark animation
                         withAnimation {
@@ -97,7 +106,7 @@ struct AmbiguousMatchRow: View {
             Text(match.sourceTrack.artist)
                 .font(.caption)
                 .foregroundColor(.secondary)
-            Text("\(match.candidates.count) candidates")
+            Text("\(match.candidates.count) \(match.candidates.count == 1 ? "candidate" : "candidates")")
                 .font(.caption2)
                 .foregroundColor(.orange)
         }
@@ -107,7 +116,9 @@ struct AmbiguousMatchRow: View {
 
 struct MatchDetailView: View {
     let match: AmbiguousMatch
-    let onSelect: (MatchScore) -> Void
+    var onSkip: () -> Void = {}
+    var onReject: (ResolutionCandidate) -> Void = { _ in }
+    let onSelect: (ResolutionCandidate) -> Void
     
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -131,8 +142,12 @@ struct MatchDetailView: View {
                 
                 ScrollView {
                     VStack(spacing: 12) {
-                        ForEach(Array(match.candidates.enumerated()), id: \.offset) { index, candidate in
-                            CandidateCard(candidate: candidate, rank: index + 1) {
+                        ForEach(Array(match.candidates.enumerated()), id: \.element.id) { index, candidate in
+                            CandidateCard(
+                                candidate: candidate,
+                                rank: index + 1,
+                                onReject: { onReject(candidate) }
+                            ) {
                                 onSelect(candidate)
                             }
                         }
@@ -142,14 +157,13 @@ struct MatchDetailView: View {
             
             Spacer()
             
-            // Skip button
-            Button {
-                // Skip this match for now
-            } label: {
-                Text("Skip")
+            // Skip: never match or add this track on the target service (saved).
+            Button(action: onSkip) {
+                Text("Skip This Track")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.bordered)
+            .accessibilityHint("Future syncs won't match or add this track.")
         }
         .padding()
     }
@@ -175,9 +189,12 @@ struct TrackCard: View {
 }
 
 struct CandidateCard: View {
-    let candidate: MatchScore
+    let candidate: ResolutionCandidate
     let rank: Int
+    var onReject: () -> Void = {}
     let onSelect: () -> Void
+
+    private var score: MatchScore { candidate.score }
     
     var body: some View {
         HStack {
@@ -189,36 +206,52 @@ struct CandidateCard: View {
                 .frame(width: 40)
             
             VStack(alignment: .leading, spacing: 8) {
+                if let track = candidate.track {
+                    TrackCard(track: track)
+                }
                 // Confidence
                 HStack {
-                    Text("Confidence: \(Int(candidate.score * 100))%")
+                    Text("Confidence: \(Int(score.score * 100))%")
                         .font(.caption)
                         .foregroundColor(.secondary)
                     
-                    ProgressView(value: candidate.score)
+                    ProgressView(value: score.score)
                         .frame(width: 100)
                 }
                 
                 // Score breakdown
                 HStack(spacing: 15) {
-                    ScoreBadge(label: "Title", score: candidate.components.titleScore)
-                    ScoreBadge(label: "Artist", score: candidate.components.artistScore)
-                    ScoreBadge(label: "Album", score: candidate.components.albumScore)
-                    ScoreBadge(label: "Duration", score: candidate.components.durationScore)
+                    ScoreBadge(label: "Title", score: score.components.titleScore)
+                    ScoreBadge(label: "Artist", score: score.components.artistScore)
+                    ScoreBadge(label: "Album", score: score.components.albumScore)
+                    ScoreBadge(label: "Duration", score: score.components.durationScore)
                 }
             }
             
             Spacer()
             
-            // Select button
-            Button {
-                onSelect()
-            } label: {
-                Text("Select")
-                    .frame(width: 80)
+            VStack(spacing: 8) {
+                Button {
+                    onSelect()
+                } label: {
+                    Text("Select")
+                        .frame(width: 80)
+                }
+                .buttonStyle(.borderedProminent)
+                .accessibilityLabel("Select \(candidate.track?.title ?? "candidate \(rank)")")
+
+                Button(role: .destructive) {
+                    onReject()
+                } label: {
+                    Text("Not This")
+                        .frame(width: 80)
+                }
+                .buttonStyle(.bordered)
+                .accessibilityLabel("Never offer \(candidate.track?.title ?? "candidate \(rank)") for this track")
             }
-            .buttonStyle(.borderedProminent)
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(candidate.accessibilityLabel)
         .padding()
         .background(Color.gray.opacity(0.05))
         .cornerRadius(8)
@@ -254,24 +287,68 @@ struct ScoreBadge: View {
 class MatchState: ObservableObject {
     @Published var ambiguousMatches: [AmbiguousMatch] = []
     @Published var isLoading = false
-    
+    @Published var errorMessage: String?
+
+    /// Shared with the CLI `resolve` command (#7, #10); decisions persist in GRDB.
+    private let service = MatchResolutionService()
+    var direction: MergeDirection = .spotifyToApple
+
     func loadAmbiguousMatches() async {
         isLoading = true
         defer { isLoading = false }
-        
-        // TODO: Load actual ambiguous matches from matching engine
-        // For now, empty state
-        ambiguousMatches = []
+        do {
+            ambiguousMatches = try await service.pendingResolutions(direction: direction).map(AmbiguousMatch.init)
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
-    
-    func resolveMatch(_ match: AmbiguousMatch, with candidate: MatchScore) async {
-        // TODO: Save manual mapping
-        ambiguousMatches.removeAll { $0.id == match.id }
+
+    func resolveMatch(_ match: AmbiguousMatch, with candidate: ResolutionCandidate) async {
+        await perform(removing: match) {
+            try await $0.choose(candidateID: candidate.id, for: match.sourceTrack,
+                                targetService: match.pending.targetService, score: candidate.score.score)
+        }
+    }
+
+    func skip(_ match: AmbiguousMatch) async {
+        await perform(removing: match) { try await $0.skip(match.sourceTrack, targetService: match.pending.targetService) }
+    }
+
+    func reject(_ candidate: ResolutionCandidate, in match: AmbiguousMatch) async {
+        do {
+            try await service.reject(candidateID: candidate.id, for: match.sourceTrack, targetService: match.pending.targetService)
+            guard let index = ambiguousMatches.firstIndex(where: { $0.id == match.id }) else { return }
+            let remaining = match.candidates.filter { $0.id != candidate.id }
+            if remaining.isEmpty {
+                ambiguousMatches.remove(at: index)
+            } else {
+                ambiguousMatches[index] = AmbiguousMatch(PendingResolution(
+                    source: match.sourceTrack, targetService: match.pending.targetService, candidates: remaining))
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func perform(removing match: AmbiguousMatch, _ action: (MatchResolutionService) async throws -> Void) async {
+        do {
+            try await action(service)
+            ambiguousMatches.removeAll { $0.id == match.id }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 }
 
 struct AmbiguousMatch: Identifiable {
-    let id = UUID()
-    let sourceTrack: CanonicalTrack
-    let candidates: [MatchScore]
+    let pending: PendingResolution
+
+    init(_ pending: PendingResolution) {
+        self.pending = pending
+    }
+
+    var id: String { pending.id }
+    var sourceTrack: CanonicalTrack { pending.source }
+    var candidates: [ResolutionCandidate] { pending.candidates }
 }

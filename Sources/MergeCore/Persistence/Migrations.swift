@@ -146,6 +146,19 @@ public enum Migrations {
             }
         }
 
+        // Migration v6: user skip / reject decisions from the match resolver (#7, #10).
+        migrator.registerMigration("v6_match_exclusions") { db in
+            try db.create(table: "match_exclusions") { t in
+                t.column("canonical_track_id", .text).notNull()
+                    .references("canonical_tracks", column: "id", onDelete: .cascade)
+                t.column("target_service", .text).notNull()
+                t.column("kind", .text).notNull()           // "skip" | "reject"
+                t.column("candidate_id", .text).notNull()   // "" for skip
+                t.column("created_at", .datetime).notNull()
+                t.primaryKey(["canonical_track_id", "target_service", "kind", "candidate_id"])
+            }
+        }
+
         try migrator.migrate(db)
     }
 }

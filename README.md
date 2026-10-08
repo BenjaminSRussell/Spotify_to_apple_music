@@ -135,6 +135,33 @@ Total Operations: 257
 ═══════════════════════
 ```
 
+#### Resolve ambiguous matches (#7, #10)
+
+Tracks that score in the ambiguous band (0.65–0.85) wait for a human decision. The CLI and the
+app's **Match Resolution** screen share one backend (`MatchResolutionService`), and every
+decision is saved in the database:
+
+| Action | CLI input | Saved as | Effect on future syncs |
+| --- | --- | --- | --- |
+| Choose a candidate | `N` | `manual_mappings` | Matched at Stage 0; fuzzy matching is skipped |
+| Reject a candidate ("Not This") | `xN` | `match_exclusions` (reject) | That candidate is never offered again for the track |
+| Skip the track | `s` | `match_exclusions` (skip) | The track is never matched, added, or prompted |
+| Decide later | Enter | nothing | Asked again next time |
+
+```bash
+swift run merge-cli resolve --direction spotify-to-apple          # interactive
+swift run merge-cli resolve --direction bidirectional --list      # just list pending tracks
+```
+
+When API credentials are configured, tracks with no local candidates are looked up in the
+target catalog first: `SpotifySearchServiceImpl` uses `GET /v1/search` and
+`AppleSearchServiceImpl` uses `GET /v1/catalog/{storefront}/search`. Hits are stored as
+target-service tracks, so they can be offered and mapped. Both clients go through an
+injectable `HTTPTransport`, and the tests use recorded JSON fixtures, so CI needs no live
+credentials. A 429 surfaces as `HTTPError` with `Retry-After`, so it follows the sync retry
+policy. In the app, candidate rows show title, artist, album and score, with VoiceOver labels
+such as "Heroes by David Bowie, album Stage, 78 percent confidence".
+
 #### 3. Execute Sync
 
 ```bash

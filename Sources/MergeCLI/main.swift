@@ -8,7 +8,7 @@ struct MergeCLI: AsyncParsableCommand {
         commandName: "merge-cli",
         abstract: "Spotify to Apple Music migration tool",
         version: "0.1.0",
-        subcommands: [Import.self, Diff.self, Sync.self, Resume.self, Rollback.self, ExportMetrics.self, Auth.self],
+        subcommands: [Import.self, Diff.self, Resolve.self, Sync.self, Resume.self, Rollback.self, ExportMetrics.self, Auth.self],
         defaultSubcommand: nil
     )
 }
@@ -328,4 +328,89 @@ func runCancellableSync(_ body: @escaping @Sendable () async throws -> SyncResul
         signal(SIGINT, SIG_DFL)
     }
     return try await task.value
+}
+
+// MARK: - Resolve (#7, #10)
+
+extension MergeCLI {
+    struct Resolve: AsyncParsableCommand {
+        static let configuration = CommandConfiguration(
+            abstract: "Resolve ambiguous matches: choose, reject a candidate, or skip a track (saved for future syncs)"
+        )
+
+        @Option(name: .long, help: "Direction: spotify-to-apple, apple-to-spotify, bidirectional")
+        var direction: String = "spotify-to-apple"
+
+        @Flag(name: .long, help: "Only list pending tracks; don't prompt")
+        var list: Bool = false
+
+        func run() async throws {
+            guard let mergeDirection = MergeDirection(cliValue: direction) else {
+                Log.error("Invalid direction: \(direction)")
+                throw ExitCode.validationFailure
+            }
+            let service = MatchResolutionService()
+            let pending = try await service.pendingResolutions(direction: mergeDirection)
+            if pending.isEmpty {
+                print("✨ No ambiguous matches to resolve.")
+                return
+            }
+            if list {
+                for item in pending {
+                    print("\(item.source.title) — \(item.source.artist): \(item.candidates.count) candidates")
+                }
+                return
+            }
+
+            var chosen = 0, skipped = 0, rejected = 0
+            loop: for (index, item) in pending.enumerated() {
+                var candidates = item.candidates
+                while true {
+                    let view = PendingResolution(source: item.source, targetService: item.targetService, candidates: candidates)
+                    print(MatchResolver.render(view, position: index + 1, total: pending.count))
+                    print("> ", terminator: "")
+                    guard let line = readLine() else { break loop }
+                    guard let choice = MatchResolver.parseChoice(line, candidateIDs: candidates.map(\.id)) else {
+                        print("❌ Invalid input")
+                        continue
+                    }
+                    switch choice {
+                    case .choose(let id):
+                        let score = candidates.first { $0.id == id }?.score.score
+                        try await service.choose(candidateID: id, for: item.source, targetService: item.targetService, score: score)
+                        chosen += 1
+                        print("✅ Saved mapping")
+                        continue loop
+                    case .reject(let id):
+                        try await service.reject(candidateID: id, for: item.source, targetService: item.targetService)
+                        candidates.removeAll { $0.id == id }
+                        rejected += 1
+                        print("🚫 Candidate won't be offered again")
+                        if candidates.isEmpty { continue loop }
+                    case .skip:
+                        try await service.skip(item.source, targetService: item.targetService)
+                        skipped += 1
+                        print("⏭️  Track skipped for future syncs")
+                        continue loop
+                    case .later:
+                        continue loop
+                    case .quit:
+                        break loop
+                    }
+                }
+            }
+            print("\nResolved: \(chosen) mapped, \(skipped) skipped, \(rejected) candidates rejected.")
+        }
+    }
+}
+
+extension MergeDirection {
+    init?(cliValue: String) {
+        switch cliValue {
+        case "spotify-to-apple": self = .spotifyToApple
+        case "apple-to-spotify": self = .appleToSpotify
+        case "bidirectional": self = .bidirectional
+        default: return nil
+        }
+    }
 }
